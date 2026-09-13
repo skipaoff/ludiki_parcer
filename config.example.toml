@@ -47,5 +47,10 @@ demo = false                # true: Binance demo trading (demo-fapi.binance.com)
 [exchanges.mexc]
 enabled = true
 
+[instruments]
+refresh_interval_s = 3600   # contracts, steps and pairs reload
+max_price_gap_pct = 20      # wider per-token price gap means a wrong multiplier or a different token
+max_index_gap_pct = 1       # wider index gap marks the pair suspicious until verified by hand
+
 [logging]
 level = "INFO"

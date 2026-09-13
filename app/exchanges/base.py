@@ -17,6 +17,7 @@ from decimal import Decimal
 from typing import AsyncIterator, Protocol
 
 from app.core.account import AccountFacts
+from app.core.pairs import Quote
 from app.core.schemas import Book, Instrument, LegSide
 
 
@@ -82,7 +83,13 @@ class ExchangeAdapter(Protocol):
         """Needs keys. Every step that fails is recorded in AccountFacts.errors instead of raising."""
         ...
 
-    async def load_instruments(self) -> list[Instrument]: ...
+    async def load_instruments(self) -> list[Instrument]:
+        """Public. Tradable USDT perpetuals with their unit bridge to tokens."""
+        ...
+
+    async def fetch_quotes(self) -> dict[str, Quote]:
+        """Public. Best prices, mark, index and 24h turnover of every contract, keyed by raw symbol."""
+        ...
 
     def watch_top_of_book(self, symbols_raw: list[str]) -> AsyncIterator[TopOfBook]: ...
 

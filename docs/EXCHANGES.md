@@ -22,9 +22,10 @@
 |---|---|---|
 | `GET /fapi/v1/ticker/24hr` | `lastPrice`, `quoteVolume` (объём 24ч в USDT), `closeTime` | [прод] |
 | `GET /fapi/v1/premiumIndex` | `markPrice` | [прод] |
-| `GET /fapi/v1/premiumIndex` | `indexPrice` | [проверить, этап 2] |
+| `GET /fapi/v1/premiumIndex` | `indexPrice` — цена за единицу котировки: у `1000PEPEUSDT` за 1000 токенов | [проверено 13.09.2026] |
 | `GET /fapi/v1/fundingInfo` | интервал фандинга по символу | [прод] |
-| `GET /fapi/v1/exchangeInfo` | фильтры `LOT_SIZE`, `MARKET_LOT_SIZE` (отдельный лимит для рыночных ордеров), `MIN_NOTIONAL`, `PRICE_FILTER` | [проверить, этап 2] |
+| `GET /fapi/v1/exchangeInfo` | контракты `contractType=PERPETUAL`, `quoteAsset=USDT`, `status=TRADING` (бывают `PENDING_TRADING`, `SETTLING`, а золото и акции идут как `TRADIFI_PERPETUAL`); фильтры `MARKET_LOT_SIZE` (шаг, минимум и максимум рыночного ордера), `LOT_SIZE`, `MIN_NOTIONAL.notional` (5 USDT), `PRICE_FILTER.tickSize` | [проверено 13.09.2026: 528 торгуемых USDT-перпетуалов] |
+| `GET /fapi/v1/ticker/bookTicker` | `bidPrice`, `askPrice` по всем символам — для каталога пар | [проверено 13.09.2026] |
 | `GET /fapi/v1/time` | `serverTime` — пинг и расхождение часов раз в 10 с (`probe_clock`) | [проверено 13.09.2026] |
 
 ### Вебсокеты [док]
@@ -77,9 +78,11 @@
 | Эндпоинт | Что берём | Статус |
 |---|---|---|
 | `GET https://contract.mexc.com/api/v1/contract/ticker` | `lastPrice`, `fairPrice`, `amount24` (объём 24ч в USDT) | [прод] |
-| то же | `bid1`, `ask1`, `indexPrice` | [проверить, этап 2] |
+| то же | **лучшие цены — `bid1` и `ask1`**, индекс — `indexPrice` | [проверено 13.09.2026] |
+| то же | `maxBidPrice` и `minAskPrice` — это **ценовые лимиты** ордеров (у BTC 84 876 и 69 444 при цене 77 123), а не лучшие цены стакана. Первая версия плана ошибочно брала их для радара | [проверено 13.09.2026] |
 | `GET https://contract.mexc.com/api/v1/contract/funding_rate` | ставки фандинга | [прод] |
-| `GET /api/v1/contract/detail` | `contractSize`, `minVol`, `maxVol`, шаг объёма и цены | [проверить, этап 2] |
+| `GET /api/v1/contract/detail` | `contractSize` (базовых единиц в контракте: у `PEPE_USDT` 10 000 000 PEPE, у `1000BONK_USDT` 10 000 единиц «1000BONK»), `volUnit` (шаг в контрактах), `minVol`, `maxVol`, `priceUnit`; фильтр: `futureType=1`, `quoteCoin=settleCoin=USDT`, `state=0`, `apiAllowed=true` (44 USDT-контракта из 1069 через API не торгуются), `isHidden=false` | [проверено 13.09.2026: 1025 контрактов] |
+| то же | `takerFeeRate` и `makerFeeRate` — публичные ставки по контракту; бывают нулевыми (зона `mc-trade-zone-0fees`). Для API объявлены 0,05% тейкер, поэтому до проверки ключей лента считает по 0,05% | [проверено 13.09.2026] |
 
 В журнале изменений от 19.01.2026 базовый домен фьючерсного API сменился на `https://api.mexc.com` [док]. Парсер в июле 2026 ещё работал через `contract.mexc.com`. **Решено на этапе 1:** терминал ходит через `https://api.mexc.com/api/v1/contract` и `/api/v1/private` — так настроен ccxt 4.5.78 [ccxt]; `GET /api/v1/contract/ping` отвечает `{"success": true, "code": 0, "data": <время сервера>}` [проверено 13.09.2026].
 
@@ -100,7 +103,7 @@
 
 - **Адрес:** `wss://contract.mexc.com/edge` [ccxt].
 - **`{"method": "sub.tickers", "param": {}}`** — все символы раз в 2 секунды [док]. Поля:
-  - `maxBidPrice` (лучший bid) и `minAskPrice` (лучший ask);
+  - лучшие цены: в REST это `bid1` и `ask1`; есть ли они в вебсокете — [проверить, этап 3]. `maxBidPrice` и `minAskPrice` — ценовые лимиты, для радара не годятся;
   - `fairPrice`, `indexPrice`, `amount24`, `lastPrice`.
 - **`{"method": "sub.depth", "param": {"symbol": "BTC_USDT"}}`** — стакан по символу раз в 200 мс [док]:
   - уровень приходит как `[price, orders_count, qty]`, где `qty` в **контрактах**; в токены переводим через `contractSize`;

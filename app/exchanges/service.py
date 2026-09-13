@@ -128,6 +128,10 @@ class ExchangeService:
             raise UnknownExchange(name)
         return exchange
 
+    def adapter(self, name: str) -> ExchangeAdapter:
+        """The current client of an exchange; it changes when keys are replaced, so do not keep it."""
+        return self._get(name).adapter
+
     async def save_keys(self, name: str, api_key: str, api_secret: str) -> dict[str, Any]:
         exchange = self._get(name)
         api_key, api_secret = api_key.strip(), api_secret.strip()
@@ -223,7 +227,7 @@ class ExchangeService:
             await asyncio.gather(*(self.probe(name) for name in self._exchanges), return_exceptions=True)
             await asyncio.sleep(self._settings.probe_interval_s)
 
-    async def probe(self, name: str) -> None:
+    async def probe(self, name: str, warm: bool = False) -> None:
         exchange = self._get(name)
         try:
             result = await asyncio.wait_for(exchange.adapter.probe_clock(), self._settings.request_timeout_s)
@@ -235,6 +239,10 @@ class ExchangeService:
                 self._journal.emit(Level.WARNING, "exchange", "link_down", exchange=name, error=exchange.probe_error)
             return
 
+        if exchange.link == "unknown" and not warm:
+            # The first round trip includes DNS and the TLS handshake, which skews both ping and clock offset.
+            await self.probe(name, warm=True)
+            return
         was = exchange.link
         exchange.failures = 0
         exchange.probe_error = None

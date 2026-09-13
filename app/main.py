@@ -29,6 +29,7 @@ from app.api.hub import Hub
 from app.api.server import APP_NAME, ApiContext, create_app
 from app.config.settings import REPO_ROOT, Settings, load_settings
 from app.exchanges.service import ExchangeService
+from app.instruments.service import InstrumentService
 from app.journal.journal import Journal, Level
 from app.keystore.keystore import DB_PASSWORD, SESSION_TOKEN, Keystore
 from app.storage.database import Database
@@ -89,6 +90,7 @@ async def _serve(
     )
     journal.add_sink(lambda event: writer.submit("events", event.to_row()))
     exchanges = ExchangeService(settings.exchanges, keystore, journal, writer.submit, redactor)
+    instruments = InstrumentService(exchanges.adapter, database, journal, settings.instruments)
 
     def snapshot() -> dict[str, Any]:
         return {
@@ -101,6 +103,7 @@ async def _serve(
                 "rejected_rows": writer.rejected_rows,
             },
             "exchanges": exchanges.snapshot(),
+            "instruments": instruments.summary(),
             "pairs": {"open": 0, "limit": 3},
         }
 
@@ -119,7 +122,13 @@ async def _serve(
     hub = Hub(snapshot, settings.ui)
     journal.add_sink(hub.push_event)
     context = ApiContext(
-        token=token, version=VERSION, hub=hub, snapshot=snapshot, journal=journal_events, exchanges=exchanges
+        token=token,
+        version=VERSION,
+        hub=hub,
+        snapshot=snapshot,
+        journal=journal_events,
+        exchanges=exchanges,
+        instruments=instruments,
     )
     app = create_app(settings.server, settings.paths.web_dist, context)
     server = _Server(
@@ -141,6 +150,7 @@ async def _serve(
         asyncio.create_task(hub.run()),
         asyncio.create_task(exchanges.run_monitor()),
         asyncio.create_task(exchanges.check_all_with_keys()),
+        asyncio.create_task(instruments.run()),
     ]
     server_task = asyncio.create_task(server.serve())
     try:

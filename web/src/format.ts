@@ -51,6 +51,12 @@ export function describe(event: JournalEvent): string {
       const warnings = Array.isArray(payload.warnings) ? payload.warnings : [];
       return `${exchangeName(event)} ключ принят${warnings.length ? ` · замечания: ${warnings.join(", ")}` : ""}`;
     }
+    case "instruments.refreshed":
+      return `пары обновлены · Binance ${String(payload.binance)} · MEXC ${String(payload.mexc)} · общих ${String(payload.pairs)} · подозрительных ${String(payload.suspicious)}`;
+    case "instruments.refresh_failed":
+      return `не удалось обновить пары · ${String(payload.error ?? "")}`;
+    case "instruments.pair_flags":
+      return `${String(payload.token)} · ${payload.blacklisted ? "в чёрном списке" : payload.manually_verified ? "проверено вручную" : "отметки сняты"}`;
     case "exchange.check_rejected": {
       const blocking = Array.isArray(payload.blocking) ? payload.blocking : [];
       return `${exchangeName(event)} ключ не принят · ${blocking.join(", ")}`;

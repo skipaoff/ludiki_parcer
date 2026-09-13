@@ -1,0 +1,65 @@
+[
+ {
+  "symbol": "BTCUSDT",
+  "bidPrice": "77123.90",
+  "bidQty": "3.101",
+  "askPrice": "77124.00",
+  "askQty": "9.659",
+  "time": 1789315497968,
+  "lastUpdateId": 11546914182145
+ },
+ {
+  "symbol": "1INCHUSDT",
+  "bidPrice": "0.0921400",
+  "bidQty": "2431",
+  "askPrice": "0.0921700",
+  "askQty": "527",
+  "time": 1789315493270,
+  "lastUpdateId": 11546913922888
+ },
+ {
+  "symbol": "ONEUSDT",
+  "bidPrice": "0.0006805",
+  "bidQty": "81143",
+  "askPrice": "0.0006808",
+  "askQty": "1023586",
+  "time": 1789315495774,
+  "lastUpdateId": 11546914062353
+ },
+ {
+  "symbol": "ETHBTC",
+  "bidPrice": "0.032314",
+  "bidQty": "0.06",
+  "askPrice": "0.032315",
+  "askQty": "0.42",
+  "time": 1789315496459,
+  "lastUpdateId": 11546914098459
+ },
+ {
+  "symbol": "1000PEPEUSDT",
+  "bidPrice": "0.0034031",
+  "bidQty": "624154",
+  "askPrice": "0.0034032",
+  "askQty": "254437",
+  "time": 1789315498331,
+  "lastUpdateId": 11546914202172
+ },
+ {
+  "symbol": "1000000MOGUSDT",
+  "bidPrice": "0.1030000",
+  "bidQty": "3832.7",
+  "askPrice": "0.1031000",
+  "askQty": "7966.4",
+  "time": 1789315481237,
+  "lastUpdateId": 11546912701188
+ },
+ {
+  "symbol": "XAUUSDT",
+  "bidPrice": "4349.56",
+  "bidQty": "6.802",
+  "askPrice": "4349.57",
+  "askQty": "45.581",
+  "time": 1789315498183,
+  "lastUpdateId": 11546914194189
+ }
+]

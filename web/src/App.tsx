@@ -7,11 +7,12 @@
 import { useEffect, useState } from "react";
 import { exchangeTitle, ExchangesSettings, signedMs } from "./Exchanges";
 import { clock, describe, uptime } from "./format";
+import { PairsScreen } from "./Pairs";
 import { useLive, type LinkState } from "./live";
 import { apiGet } from "./session";
 import type { ExchangeState, JournalEvent, Snapshot } from "./types";
 
-type TabId = "gaps" | "funding" | "unlocks" | "trades" | "stats" | "settings";
+type TabId = "gaps" | "funding" | "unlocks" | "trades" | "stats" | "pairs" | "settings";
 
 const TABS: { id: TabId; label: string }[] = [
   { id: "gaps", label: "Гэпы" },
@@ -19,6 +20,7 @@ const TABS: { id: TabId; label: string }[] = [
   { id: "unlocks", label: "Разлоки·скоро" },
   { id: "trades", label: "Сделки" },
   { id: "stats", label: "Статистика" },
+  { id: "pairs", label: "Пары" },
   { id: "settings", label: "Настройки" },
 ];
 
@@ -69,6 +71,7 @@ export function App({ token }: { token: string }) {
         {(tab === "funding" || tab === "unlocks") && <Placeholder text="Раздел появится после MVP." />}
         {tab === "trades" && <Placeholder text="История закрытых пар появится на этапе 6." />}
         {tab === "stats" && <Placeholder text="Статистика появится на этапе 7. Запись истории вилок — этап 4." />}
+        {tab === "pairs" && <PairsScreen token={token} summary={live.snapshot?.instruments} />}
         {tab === "settings" && <SettingsScreen token={token} snapshot={live.snapshot} now={now} />}
       </main>
 

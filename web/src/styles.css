@@ -194,6 +194,67 @@ button:disabled {
   border-bottom: 1px solid var(--line);
 }
 
+a {
+  color: inherit;
+  text-decoration: underline;
+  text-decoration-color: var(--line);
+  text-underline-offset: 3px;
+}
+
+a:hover {
+  text-decoration-color: var(--fg);
+}
+
+.strong {
+  font-weight: 700;
+}
+
+.nowrap {
+  white-space: nowrap;
+}
+
+.pairs-screen {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+.filters {
+  justify-content: flex-start;
+  gap: 1.5rem;
+  align-items: center;
+}
+
+.filters input {
+  margin-left: auto;
+  width: 14rem;
+}
+
+.table-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+
+.pairs-table td {
+  color: var(--fg);
+  white-space: nowrap;
+}
+
+.pairs-table tr.muted td {
+  color: var(--muted);
+}
+
+.grid thead th {
+  position: sticky;
+  top: 0;
+  background: var(--bg);
+}
+
+.sortable {
+  cursor: pointer;
+}
+
 .exchange-card {
   margin-bottom: 1.5rem;
 }

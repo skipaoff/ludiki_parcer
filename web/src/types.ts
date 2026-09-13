@@ -65,8 +65,49 @@ export interface ExchangeDetails {
   check: CheckResult | null;
 }
 
+export interface InstrumentsSummary {
+  pairs: number;
+  tradable: number;
+  suspicious: number;
+  blacklisted: number;
+  refreshed_at_ms: number | null;
+  refreshing: boolean;
+  error: string | null;
+}
+
+export interface PairLeg {
+  exchange: string;
+  symbol: string;
+  url: string | null;
+  qty_unit_tokens: string;
+  price_unit_tokens: string;
+  step_tokens: string;
+  min_qty_tokens: string;
+  min_notional_usd: string;
+  price_per_token: string | null;
+}
+
+export interface PairView {
+  key: string;
+  pair_id: number | null;
+  token: string;
+  a: PairLeg;
+  b: PairLeg;
+  common_step_tokens: string;
+  min_qty_tokens: string;
+  price_gap_pct: string | null;
+  index_gap_pct: string | null;
+  volume24h_weak_usd: string | null;
+  reason: string | null;
+  manually_verified: boolean;
+  blacklisted: boolean;
+  suspicious: boolean;
+  tradable: boolean;
+}
+
 export interface Snapshot {
   app: { version: string; started_ts_ms: number };
+  instruments?: InstrumentsSummary;
   database: {
     status: "ok" | "down";
     error: string | null;

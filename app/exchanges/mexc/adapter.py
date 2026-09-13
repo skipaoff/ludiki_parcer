@@ -1,5 +1,5 @@
 """
-VFP: MEXC futures behind the adapter contract — public clock probe and the account and key check.
+VFP: MEXC futures behind the adapter contract — contracts, public quotes, clock probe, account and key check.
 Changes when: MEXC changes its contract API or the terminal needs more from MEXC.
 Anti-goal:
 1. Deciding whether the key is acceptable — the adapter reports facts, app/core/account.py judges them.
@@ -16,6 +16,9 @@ from typing import Any
 import ccxt.async_support as ccxt
 
 from app.core.account import AccountFacts, KeyPermissions, clock_offset_ms
+from app.core.pairs import Quote
+from app.core.schemas import Instrument
+from app.core.symbols import parse_symbol
 from app.exchanges.base import ClockProbe
 from app.exchanges.ccxt_support import now_ms, parse, step
 
@@ -36,6 +39,65 @@ def unwrap(raw: dict[str, Any]) -> Any:
 
 def _decimal(value: Any) -> Decimal | None:
     return None if value is None else Decimal(str(value))
+
+
+def parse_instruments(raw: dict[str, Any]) -> list[Instrument]:
+    """
+    GET /api/v1/contract/detail — USDT perpetuals that are open and allowed for API trading.
+    Quantity is in contracts: one contract holds contractSize base units, and a base unit of 1000BONK is 1000 BONK.
+    MEXC has no minimum notional.
+    """
+    instruments = []
+    for item in unwrap(raw) or []:
+        if (
+            item.get("futureType") != 1
+            or item.get("quoteCoin") != "USDT"
+            or item.get("settleCoin") != "USDT"
+            or item.get("state") != 0
+            or not item.get("apiAllowed", False)
+            or item.get("isHidden", False)
+        ):
+            continue
+        parsed = parse_symbol(item["symbol"], "mexc")
+        if parsed is None:
+            continue
+        instruments.append(
+            Instrument(
+                exchange="mexc",
+                symbol_raw=item["symbol"],
+                token=parsed.token,
+                qty_unit_tokens=Decimal(str(item["contractSize"])) * parsed.multiplier,
+                price_unit_tokens=parsed.multiplier,
+                qty_step_units=Decimal(str(item.get("volUnit") or 1)),
+                min_qty_units=Decimal(str(item["minVol"])),
+                max_market_qty_units=_decimal(item.get("maxVol")),
+                min_notional_usd=Decimal(0),
+                price_tick=_decimal(item.get("priceUnit")),
+            )
+        )
+    return instruments
+
+
+def parse_quotes(raw: dict[str, Any]) -> dict[str, Quote]:
+    """
+    GET /api/v1/contract/ticker — all symbols. Best prices are bid1/ask1; maxBidPrice/minAskPrice are price limits,
+    not the book. amount24 is the 24h turnover in USDT.
+    """
+    quotes = {}
+    for item in unwrap(raw) or []:
+        quotes[item["symbol"]] = Quote(
+            bid=_positive(item.get("bid1")),
+            ask=_positive(item.get("ask1")),
+            mark=_positive(item.get("fairPrice")),
+            index=_positive(item.get("indexPrice")),
+            volume24h_usd=_positive(item.get("amount24")),
+        )
+    return quotes
+
+
+def _positive(value: Any) -> Decimal | None:
+    number = _decimal(value)
+    return number if number is not None and number > 0 else None
 
 
 def parse_one_way(raw: dict[str, Any]) -> bool | None:
@@ -83,13 +145,22 @@ class MexcAdapter:
                 "options": {"defaultType": "swap"},
             }
         )
+        # Probes get their own client so the rate limiter never queues them behind catalog requests.
+        self._probe_client = ccxt.mexc({"enableRateLimit": False, "timeout": int(timeout_s * 1000)})
 
     async def close(self) -> None:
         await self._client.close()
+        await self._probe_client.close()
+
+    async def load_instruments(self) -> list[Instrument]:
+        return parse_instruments(await self._client.contract_public_get_detail())
+
+    async def fetch_quotes(self) -> dict[str, Quote]:
+        return parse_quotes(await self._client.contract_public_get_ticker())
 
     async def probe_clock(self) -> ClockProbe:
         sent = now_ms()
-        response = await self._client.contract_public_get_ping()
+        response = await self._probe_client.contract_public_get_ping()
         received = now_ms()
         server = int(unwrap(response))
         return ClockProbe(

@@ -57,6 +57,7 @@ class Instrument:
     min_qty_units: Decimal
     max_market_qty_units: Decimal | None
     min_notional_usd: Decimal
+    price_tick: Decimal | None = None
 
     @property
     def qty_step_tokens(self) -> Decimal:

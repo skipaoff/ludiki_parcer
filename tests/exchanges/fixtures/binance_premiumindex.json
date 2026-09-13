@@ -1,0 +1,82 @@
+[
+ {
+  "symbol": "ETHBTC",
+  "markPrice": "0.03231900",
+  "indexPrice": "0.03233546",
+  "estimatedSettlePrice": "0.03229249",
+  "lastFundingRate": "0.00000000",
+  "interestRate": "0.00000000",
+  "nextFundingTime": 1789344000000,
+  "time": 1789315495000
+ },
+ {
+  "symbol": "OMGUSDT",
+  "markPrice": "0.15445273",
+  "indexPrice": "0.15445273",
+  "estimatedSettlePrice": "0.00000000",
+  "lastFundingRate": "0.00000000",
+  "interestRate": "0.00010000",
+  "nextFundingTime": 1789344000000,
+  "time": 1789315495000
+ },
+ {
+  "symbol": "ONEUSDT",
+  "markPrice": "0.00068008",
+  "indexPrice": "0.00068080",
+  "estimatedSettlePrice": "0.00068087",
+  "lastFundingRate": "0.00005000",
+  "interestRate": "0.00010000",
+  "nextFundingTime": 1789344000000,
+  "time": 1789315495000
+ },
+ {
+  "symbol": "1000PEPEUSDT",
+  "markPrice": "0.00340342",
+  "indexPrice": "0.00340680",
+  "estimatedSettlePrice": "0.00340508",
+  "lastFundingRate": "0.00010000",
+  "interestRate": "0.00010000",
+  "nextFundingTime": 1789344000000,
+  "time": 1789315495000
+ },
+ {
+  "symbol": "XAUUSDT",
+  "markPrice": "4350.19537177",
+  "indexPrice": "4350.19537177",
+  "estimatedSettlePrice": "4351.67111977",
+  "lastFundingRate": "0.00000000",
+  "interestRate": "0.00000000",
+  "nextFundingTime": 1789329600000,
+  "time": 1789315493766
+ },
+ {
+  "symbol": "1INCHUSDT",
+  "markPrice": "0.09216328",
+  "indexPrice": "0.09232541",
+  "estimatedSettlePrice": "0.09217919",
+  "lastFundingRate": "-0.00012730",
+  "interestRate": "0.00010000",
+  "nextFundingTime": 1789344000000,
+  "time": 1789315495000
+ },
+ {
+  "symbol": "BTCUSDT",
+  "markPrice": "77124.29884167",
+  "indexPrice": "77161.22125000",
+  "estimatedSettlePrice": "77132.38169774",
+  "lastFundingRate": "0.00006429",
+  "interestRate": "0.00010000",
+  "nextFundingTime": 1789344000000,
+  "time": 1789315495000
+ },
+ {
+  "symbol": "1000000MOGUSDT",
+  "markPrice": "0.10306418",
+  "indexPrice": "0.10302000",
+  "estimatedSettlePrice": "0.10325613",
+  "lastFundingRate": "0.00005000",
+  "interestRate": "0.00010000",
+  "nextFundingTime": 1789329600000,
+  "time": 1789315495000
+ }
+]

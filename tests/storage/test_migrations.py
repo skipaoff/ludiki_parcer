@@ -58,12 +58,14 @@ async def test_repository_migrations_apply_once_on_a_fresh_database():
 
     connection = await asyncpg.connect(dsn)
     try:
-        applied = await migrate(connection, REPO_ROOT / "db")
+        # Other db tests may have migrated the scratch database already; the end state is what matters.
+        await migrate(connection, REPO_ROOT / "db")
         again = await migrate(connection, REPO_ROOT / "db")
+        recorded = [row["filename"] for row in await connection.fetch("SELECT filename FROM schema_migrations ORDER BY version")]
         hypertables = await connection.fetchval("SELECT count(*) FROM timescaledb_information.hypertables")
     finally:
         await connection.close()
 
-    assert applied == ["001_schema.sql", "002_timescale.sql"]
+    assert recorded == ["001_schema.sql", "002_timescale.sql"]
     assert again == []
     assert hypertables == 5

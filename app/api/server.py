@@ -25,6 +25,7 @@ from starlette.staticfiles import StaticFiles
 from app.api.hub import Hub
 from app.config.settings import ServerSettings
 from app.exchanges.service import ExchangeService, InvalidKeys, UnknownExchange
+from app.instruments.service import InstrumentService, UnknownPair
 
 APP_NAME = "terminal-ludik"
 AUTH_TIMEOUT_S = 3
@@ -44,6 +45,7 @@ class ApiContext:
     snapshot: Callable[[], dict[str, Any]]
     journal: Callable[[int], Awaitable[list[dict[str, Any]]]]
     exchanges: ExchangeService | None = None
+    instruments: InstrumentService | None = None
 
 
 def allowed_origins(server: ServerSettings) -> frozenset[str]:
@@ -115,6 +117,34 @@ def create_app(server: ServerSettings, web_dist: Path, context: ApiContext) -> F
     async def check_exchange(name: str) -> dict[str, Any]:
         with exchange_errors():
             return await exchanges().check(name)
+
+    def instruments() -> InstrumentService:
+        if context.instruments is None:
+            raise HTTPException(status_code=503, detail="instruments are not available")
+        return context.instruments
+
+    @app.get("/api/pairs", dependencies=[Depends(require_token)])
+    async def list_pairs() -> dict[str, Any]:
+        return instruments().describe()
+
+    @app.post("/api/pairs/flags", dependencies=[Depends(require_token)])
+    async def pair_flags(request: Request) -> dict[str, Any]:
+        try:
+            body = orjson.loads(await request.body())
+            key = body["key"]
+            verified, blacklisted = body.get("manually_verified"), body.get("blacklisted")
+            if not isinstance(key, str) or any(flag is not None and not isinstance(flag, bool) for flag in (verified, blacklisted)):
+                raise TypeError
+        except (orjson.JSONDecodeError, KeyError, TypeError):
+            raise HTTPException(status_code=400, detail="expected key and optional boolean flags") from None
+        try:
+            return await instruments().set_flags(key, verified, blacklisted)
+        except UnknownPair:
+            raise HTTPException(status_code=404, detail="unknown pair") from None
+
+    @app.post("/api/instruments/refresh", dependencies=[Depends(require_token)])
+    async def refresh_instruments() -> dict[str, Any]:
+        return await instruments().refresh()
 
     @app.websocket("/ws")
     async def live(websocket: WebSocket) -> None:

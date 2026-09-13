@@ -10,6 +10,7 @@ Anti-goal:
 from __future__ import annotations
 
 import tomllib
+from decimal import Decimal
 from pathlib import Path
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -86,6 +87,12 @@ class ExchangesSettings(_Section):
     mexc: MexcSettings = MexcSettings()
 
 
+class InstrumentsSettings(_Section):
+    refresh_interval_s: float = Field(default=3600, ge=60)
+    max_price_gap_pct: Decimal = Field(default=Decimal("20"), gt=0)
+    max_index_gap_pct: Decimal = Field(default=Decimal("1"), gt=0)
+
+
 class LoggingSettings(_Section):
     level: str = "INFO"
 
@@ -97,6 +104,7 @@ class Settings(_Section):
     storage: StorageSettings = StorageSettings()
     ui: UiSettings = UiSettings()
     exchanges: ExchangesSettings = ExchangesSettings()
+    instruments: InstrumentsSettings = InstrumentsSettings()
     logging: LoggingSettings = LoggingSettings()
 
 

@@ -19,12 +19,10 @@ import asyncpg
 import orjson
 
 from app.config.settings import LOOPBACK_HOSTS, DatabaseSettings
+from app.storage.bulk import bulk_insert
 from app.storage.migrations import migrate
 
 log = logging.getLogger(__name__)
-
-_IDENTIFIER_OK = frozenset("abcdefghijklmnopqrstuvwxyz0123456789_")
-
 
 def is_connection_error(exc: BaseException) -> bool:
     return isinstance(
@@ -37,17 +35,6 @@ def is_connection_error(exc: BaseException) -> bool:
             asyncpg.exceptions.OperatorInterventionError,
         ),
     )
-
-
-def _identifier(name: str) -> str:
-    if not name or name[0].isdigit() or not set(name) <= _IDENTIFIER_OK:
-        raise ValueError(f"unsafe SQL identifier: {name!r}")
-    return f'"{name}"'
-
-
-def insert_sql(table: str, columns: tuple[str, ...]) -> str:
-    placeholders = ", ".join(f"${index}" for index in range(1, len(columns) + 1))
-    return f"INSERT INTO {_identifier(table)} ({', '.join(map(_identifier, columns))}) VALUES ({placeholders})"
 
 
 def _json_dumps(value: Any) -> str:
@@ -132,15 +119,14 @@ class Database:
             await pool.close()
 
     async def insert_batch(self, rows: list[tuple[str, dict[str, Any]]]) -> None:
-        """Insert rows of any tables in one transaction, grouped by table and column set."""
-        groups: dict[tuple[str, tuple[str, ...]], list[tuple[Any, ...]]] = {}
+        """Insert rows of any tables in one transaction, one verified statement per table and column set."""
+        groups: dict[tuple[str, tuple[str, ...]], list[dict[str, Any]]] = {}
         for table, row in rows:
-            columns = tuple(row)
-            groups.setdefault((table, columns), []).append(tuple(row[column] for column in columns))
+            groups.setdefault((table, tuple(row)), []).append(row)
         async with self.pool.acquire() as connection:
             async with connection.transaction():
-                for (table, columns), values in groups.items():
-                    await connection.executemany(insert_sql(table, columns), values)
+                for (table, _), group in groups.items():
+                    await bulk_insert(connection, table, group)
 
     async def _ensure_cluster(self) -> None:
         if not self._settings.autostart or self._settings.host not in LOOPBACK_HOSTS:

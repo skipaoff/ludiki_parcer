@@ -1,5 +1,5 @@
 """
-VFP: Binance USDⓈ-M futures behind the adapter contract — public clock probe and the account and key check.
+VFP: Binance USDⓈ-M futures behind the adapter contract — contracts, public quotes, clock probe, account and key check.
 Changes when: Binance changes these endpoints or the terminal needs more from Binance.
 Anti-goal:
 1. Deciding whether the key is acceptable — the adapter reports facts, app/core/account.py judges them.
@@ -10,16 +10,93 @@ Endpoints and response shapes: docs/EXCHANGES.md, section Binance.
 
 from __future__ import annotations
 
+import asyncio
 from decimal import Decimal
 from typing import Any
 
 import ccxt.async_support as ccxt
 
 from app.core.account import AccountFacts, KeyPermissions, clock_offset_ms
+from app.core.pairs import Quote
+from app.core.schemas import Instrument
+from app.core.symbols import parse_symbol
 from app.exchanges.base import ClockProbe
 from app.exchanges.ccxt_support import now_ms, parse, step, to_bool
 
 FEE_REFERENCE_SYMBOL = "BTCUSDT"
+
+
+def _filters(symbol: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    return {item["filterType"]: item for item in symbol.get("filters", [])}
+
+
+def parse_instruments(exchange_info: dict[str, Any]) -> list[Instrument]:
+    """
+    GET /fapi/v1/exchangeInfo — USDT-margined perpetuals that are trading now.
+    Market orders obey MARKET_LOT_SIZE (falls back to LOT_SIZE); 1000PEPEUSDT quantity and price are per 1000 tokens.
+    """
+    instruments = []
+    for symbol in exchange_info.get("symbols", []):
+        if (
+            symbol.get("contractType") != "PERPETUAL"
+            or symbol.get("quoteAsset") != "USDT"
+            or symbol.get("marginAsset", "USDT") != "USDT"
+            or symbol.get("status") != "TRADING"
+        ):
+            continue
+        parsed = parse_symbol(symbol["symbol"], "binance")
+        if parsed is None:
+            continue
+        filters = _filters(symbol)
+        lot = filters.get("MARKET_LOT_SIZE") or filters["LOT_SIZE"]
+        step = Decimal(str(lot["stepSize"]))
+        if step <= 0:
+            step = Decimal(str(filters["LOT_SIZE"]["stepSize"]))
+        instruments.append(
+            Instrument(
+                exchange="binance",
+                symbol_raw=symbol["symbol"],
+                token=parsed.token,
+                qty_unit_tokens=parsed.multiplier,
+                price_unit_tokens=parsed.multiplier,
+                qty_step_units=step,
+                min_qty_units=Decimal(str(lot["minQty"])),
+                max_market_qty_units=Decimal(str(lot["maxQty"])) if "maxQty" in lot else None,
+                min_notional_usd=Decimal(str(filters.get("MIN_NOTIONAL", {}).get("notional", "0"))),
+                price_tick=Decimal(str(filters["PRICE_FILTER"]["tickSize"])) if "PRICE_FILTER" in filters else None,
+            )
+        )
+    return instruments
+
+
+def parse_quotes(
+    premium_index: list[dict[str, Any]],
+    book_ticker: list[dict[str, Any]],
+    ticker_24h: list[dict[str, Any]],
+) -> dict[str, Quote]:
+    """GET /fapi/v1/premiumIndex, /fapi/v1/ticker/bookTicker and /fapi/v1/ticker/24hr, joined by symbol."""
+    books = {item["symbol"]: item for item in book_ticker}
+    volumes = {item["symbol"]: item for item in ticker_24h}
+    quotes = {}
+    for item in premium_index:
+        symbol = item["symbol"]
+        book = books.get(symbol, {})
+        volume = volumes.get(symbol, {})
+        quotes[symbol] = Quote(
+            bid=_positive(book.get("bidPrice")),
+            ask=_positive(book.get("askPrice")),
+            mark=_positive(item.get("markPrice")),
+            index=_positive(item.get("indexPrice")),
+            volume24h_usd=_positive(volume.get("quoteVolume")),
+        )
+    return quotes
+
+
+def _positive(value: Any) -> Decimal | None:
+    if value in (None, ""):
+        return None
+    number = Decimal(str(value))
+    return number if number > 0 else None
 
 
 def parse_permissions(raw: dict[str, Any]) -> KeyPermissions:
@@ -70,15 +147,31 @@ class BinanceAdapter:
                 "timeout": int(timeout_s * 1000),
             }
         )
+        # Probes get their own client: in the shared one ccxt's rate limiter queues them behind heavy catalog
+        # requests (ticker/24hr costs 40), which showed up as multi-second pings.
+        self._probe_client = ccxt.binanceusdm({"enableRateLimit": False, "timeout": int(timeout_s * 1000)})
         if demo:
             self._client.enable_demo_trading(True)
+            self._probe_client.enable_demo_trading(True)
 
     async def close(self) -> None:
         await self._client.close()
+        await self._probe_client.close()
+
+    async def load_instruments(self) -> list[Instrument]:
+        return parse_instruments(await self._client.fapipublic_get_exchangeinfo())
+
+    async def fetch_quotes(self) -> dict[str, Quote]:
+        premium, books, tickers = await asyncio.gather(
+            self._client.fapipublic_get_premiumindex(),
+            self._client.fapipublic_get_ticker_bookticker(),
+            self._client.fapipublic_get_ticker_24hr(),
+        )
+        return parse_quotes(premium, books, tickers)
 
     async def probe_clock(self) -> ClockProbe:
         sent = now_ms()
-        response = await self._client.fapipublic_get_time()
+        response = await self._probe_client.fapipublic_get_time()
         received = now_ms()
         server = int(response["serverTime"])
         offset = clock_offset_ms(sent, received, server)
