@@ -1,0 +1,13 @@
+[project]
+name = "terminal-ludik"
+version = "0.0.1"
+description = "Local trading terminal for cross-exchange perpetual price gaps"
+requires-python = ">=3.12"
+dependencies = []
+
+[project.optional-dependencies]
+dev = ["pytest>=8"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]

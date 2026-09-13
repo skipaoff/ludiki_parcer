@@ -1,0 +1,28 @@
+# secrets — API keys live only in macOS Keychain, never in files
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+secrets*
+
+# local runtime data
+*.db
+*.sqlite*
+data/
+logs/
+*.jsonl
+
+# python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+
+# web
+node_modules/
+dist/
+
+# os
+.DS_Store

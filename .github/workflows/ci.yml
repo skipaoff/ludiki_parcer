@@ -1,0 +1,57 @@
+# VFP: Every push and pull request proves the core math and the database schema still work.
+# Changes when: the Python version range, the database image or the checked artifacts change.
+# Anti-goal:
+# 1. Real exchange API keys or calls to live exchanges in CI.
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  core-tests:
+    name: Core tests (Python ${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - run: python -m pip install --upgrade pip pytest
+      - run: python -m pytest -q
+
+  db-schema:
+    name: Database schema (PostgreSQL 18 + TimescaleDB)
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: timescale/timescaledb:2.30.0-pg18
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      PGHOST: localhost
+      PGUSER: postgres
+      PGPASSWORD: postgres
+    steps:
+      - uses: actions/checkout@v4
+      - name: Apply 001_schema.sql
+        run: psql -v ON_ERROR_STOP=1 -f db/001_schema.sql
+      - name: Apply 002_timescale.sql
+        run: psql -v ON_ERROR_STOP=1 -f db/002_timescale.sql
+      - name: Check hypertables and policies
+        run: |
+          psql -v ON_ERROR_STOP=1 -At -c "SELECT hypertable_name FROM timescaledb_information.hypertables ORDER BY 1"
+          psql -v ON_ERROR_STOP=1 -At -c "SELECT proc_name, hypertable_name FROM timescaledb_information.jobs WHERE hypertable_name IS NOT NULL ORDER BY 1, 2"
