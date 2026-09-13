@@ -5,7 +5,10 @@
 - **[прод]** — работало в парсере crypto_pars на сервере (июль 2026);
 - **[док]** — сверено с документацией биржи 13.09.2026;
 - **[ccxt]** — из исходников ccxt 4.5.78;
-- **[проверить]** — ожидаемое поведение, подтвердить на указанном этапе плана.
+- **[проверить]** — ожидаемое поведение, подтвердить на указанном этапе плана;
+- **[проверено]** — вызвано терминалом вживую, дата указана.
+
+**Сеть с машины разработки [проверено 13.09.2026].** Публичный REST из дома через перехват HTTPS антивирусом Avast: первый запрос 1–1,3 с (установка TLS), дальше 310–470 мс до обеих бирж. ccxt держит свой набор сертификатов, поэтому терминал включает системное хранилище через `truststore` (`app/system/tls.py`).
 
 ---
 
@@ -22,7 +25,7 @@
 | `GET /fapi/v1/premiumIndex` | `indexPrice` | [проверить, этап 2] |
 | `GET /fapi/v1/fundingInfo` | интервал фандинга по символу | [прод] |
 | `GET /fapi/v1/exchangeInfo` | фильтры `LOT_SIZE`, `MARKET_LOT_SIZE` (отдельный лимит для рыночных ордеров), `MIN_NOTIONAL`, `PRICE_FILTER` | [проверить, этап 2] |
-| `GET /fapi/v1/time` | серверное время для расчёта расхождения часов | [проверить, этап 1] |
+| `GET /fapi/v1/time` | `serverTime` — пинг и расхождение часов раз в 10 с (`probe_clock`) | [проверено 13.09.2026] |
 
 ### Вебсокеты [док]
 
@@ -33,11 +36,24 @@
 - **`!markPrice@arr@1s`** — mark и index цены по всем символам [проверить путь `/public` или `/market`, этап 3].
 - **Лимит:** до 200 потоков на одно соединение для фьючерсов [ccxt]. Соединение живёт не больше суток, обрывы плановые [проверить, этап 3].
 
-### Приватная часть (через ccxt) [проверить, этапы 1, 5, 6]
+### Проверка ключа и аккаунта (этап 1, `app/exchanges/binance/adapter.py`)
 
-- Баланс, позиции, цена ликвидации.
-- Права ключа: `GET /sapi/v1/account/apiRestrictions`, поле `enableWithdrawals` должно быть `false`.
-- Режим позиций: `dualSidePosition`. В MVP требуем one-way.
+Сырые эндпоинты ccxt, чтобы деньги и ставки приходили строками без float. Форматы по документации [док], подтвердить на первой проверке с настоящим ключом [проверить, этап 1].
+
+| Эндпоинт | Метод ccxt | Что берём |
+|---|---|---|
+| `GET /sapi/v1/account/apiRestrictions` | `sapi_get_account_apirestrictions` | `enableReading`, `enableFutures`, `enableWithdrawals` (должно быть `false`), `ipRestrict` |
+| `GET /fapi/v1/positionSide/dual` | `fapiprivate_get_positionside_dual` | `dualSidePosition`: `true` — hedge, терминал требует `false` |
+| `GET /fapi/v3/balance` | `fapiprivatev3_get_balance` | строка `USDT`: `balance`, `availableBalance` |
+| `GET /fapi/v1/commissionRate?symbol=BTCUSDT` | `fapiprivate_get_commissionrate` | `takerCommissionRate`, `makerCommissionRate` (доли, не проценты) |
+
+Подпись: ccxt подписывает запрос локальным временем минус `options["timeDifference"]`; терминал выставляет его из каждого замера часов.
+
+Демо-торговля: `enable_demo_trading(True)` переключает fapi на `demo-fapi.binance.com` [ccxt]. У демо нет `sapi`, поэтому права ключа не запрашиваются; демо-ключи хранятся отдельно (`binance-demo:*`).
+
+### Приватная часть (через ccxt) [проверить, этапы 5, 6]
+
+- Позиции, цена ликвидации.
 - Плечо и режим маржи по символу.
 - Комиссия аккаунта по символу.
 - Рыночный ордер с `reduceOnly` и `newClientOrderId`. У ccxt есть `create_order_ws` для отправки ордера через торговый вебсокет [ccxt].
@@ -65,7 +81,20 @@
 | `GET https://contract.mexc.com/api/v1/contract/funding_rate` | ставки фандинга | [прод] |
 | `GET /api/v1/contract/detail` | `contractSize`, `minVol`, `maxVol`, шаг объёма и цены | [проверить, этап 2] |
 
-В журнале изменений от 19.01.2026 базовый домен фьючерсного API сменился на `https://api.mexc.com` [док]. Парсер в июле 2026 ещё работал через `contract.mexc.com`. Какой домен использовать, решаем на этапе 1.
+В журнале изменений от 19.01.2026 базовый домен фьючерсного API сменился на `https://api.mexc.com` [док]. Парсер в июле 2026 ещё работал через `contract.mexc.com`. **Решено на этапе 1:** терминал ходит через `https://api.mexc.com/api/v1/contract` и `/api/v1/private` — так настроен ccxt 4.5.78 [ccxt]; `GET /api/v1/contract/ping` отвечает `{"success": true, "code": 0, "data": <время сервера>}` [проверено 13.09.2026].
+
+### Проверка ключа и аккаунта (этап 1, `app/exchanges/mexc/adapter.py`)
+
+Ответы обёрнуты в `{"success", "code", "data"}`. Форматы по документации [док], подтвердить на первой проверке с настоящим ключом [проверить, этап 1].
+
+| Эндпоинт | Метод ccxt | Что берём |
+|---|---|---|
+| `GET /api/v1/private/position/position_mode` | `contract_private_get_position_position_mode` | `data`: 1 — hedge, 2 — one-way |
+| `GET /api/v1/private/account/assets` | `contract_private_get_account_assets` | строка `USDT`: `equity` (или `cashBalance`), `availableBalance` — числа JSON |
+| `GET /api/v1/private/account/contract/fee_rate` | `contract_private_get_account_contract_fee_rate` | ставки тейкера и мейкера; имена полей не подтверждены, адаптер пробует `takerFeeRate`/`takerFee` |
+| `GET /api/v1/contract/detail?symbol=BTC_USDT` | `contract_public_get_detail` | запасной источник ставок по умолчанию: `takerFeeRate`, `makerFeeRate` |
+
+Права ключа для фьючерсов MEXC не отдаёт, поэтому в проверке они «неизвестно» и висит предупреждение: вывод у ключа выключается вручную при выпуске.
 
 ### Вебсокеты
 

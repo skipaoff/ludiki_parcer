@@ -18,6 +18,10 @@ export function uptime(fromMs: number, nowMs: number): string {
   return hours > 0 ? `${hours}:${pad(minutes)}:${pad(seconds)}` : `${minutes}:${pad(seconds)}`;
 }
 
+function exchangeName(event: JournalEvent): string {
+  return (event.exchange ?? "?").toUpperCase();
+}
+
 export function describe(event: JournalEvent): string {
   const payload = event.payload ?? {};
   switch (`${event.source}.${event.type}`) {
@@ -35,6 +39,22 @@ export function describe(event: JournalEvent): string {
     }
     case "storage.db_unavailable":
       return `база недоступна, запись идёт в буфер на диске · ${String(payload.error ?? "")}`;
+    case "exchange.link_up":
+      return `${exchangeName(event)} на связи · ${String(payload.ping_ms ?? "?")}мс`;
+    case "exchange.link_down":
+      return `${exchangeName(event)} нет связи · ${String(payload.error ?? "")}`;
+    case "exchange.keys_saved":
+      return `${exchangeName(event)} ключи сохранены · ${String(payload.key ?? "")}`;
+    case "exchange.keys_deleted":
+      return `${exchangeName(event)} ключи удалены`;
+    case "exchange.check_ok": {
+      const warnings = Array.isArray(payload.warnings) ? payload.warnings : [];
+      return `${exchangeName(event)} ключ принят${warnings.length ? ` · замечания: ${warnings.join(", ")}` : ""}`;
+    }
+    case "exchange.check_rejected": {
+      const blocking = Array.isArray(payload.blocking) ? payload.blocking : [];
+      return `${exchangeName(event)} ключ не принят · ${blocking.join(", ")}`;
+    }
     default:
       return `${event.source}.${event.type}${event.exchange ? ` · ${event.exchange.toUpperCase()}` : ""}`;
   }

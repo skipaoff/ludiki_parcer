@@ -28,17 +28,18 @@ import uvicorn
 from app.api.hub import Hub
 from app.api.server import APP_NAME, ApiContext, create_app
 from app.config.settings import REPO_ROOT, Settings, load_settings
+from app.exchanges.service import ExchangeService
 from app.journal.journal import Journal, Level
-from app.keystore.keystore import DB_PASSWORD, SESSION_TOKEN, Keystore, api_key_name
+from app.keystore.keystore import DB_PASSWORD, SESSION_TOKEN, Keystore
 from app.storage.database import Database
 from app.storage.events import recent_events
 from app.storage.spool import Spool
 from app.storage.writer import WriteQueue
 from app.system.event_loop import loop_factory
 from app.system.log_setup import SecretRedactor, configure_logging
+from app.system.tls import use_system_trust_store
 
-VERSION = "0.0.1"
-EXCHANGES = ("binance", "mexc")
+VERSION = "0.1.0"
 SHUTDOWN_TIMEOUT_S = 10
 
 log = logging.getLogger("app")
@@ -74,7 +75,9 @@ def _level_for(kind: str) -> Level:
     return Level.WARNING if kind == "db_unavailable" else Level.INFO
 
 
-async def _serve(settings: Settings, keystore: Keystore, token: str, open_browser: bool) -> None:
+async def _serve(
+    settings: Settings, keystore: Keystore, redactor: SecretRedactor, token: str, open_browser: bool
+) -> None:
     started_ms = int(time.time() * 1000)
     journal = Journal(settings.ui.journal_buffer)
     database = Database(settings.database, lambda: keystore.get(DB_PASSWORD), REPO_ROOT / "db", settings.paths.logs_dir)
@@ -85,7 +88,7 @@ async def _serve(settings: Settings, keystore: Keystore, token: str, open_browse
         notify=lambda kind, detail: journal.emit(_level_for(kind), "storage", kind, **detail),
     )
     journal.add_sink(lambda event: writer.submit("events", event.to_row()))
-    keys_present = {exchange: keystore.get(api_key_name(exchange)) is not None for exchange in EXCHANGES}
+    exchanges = ExchangeService(settings.exchanges, keystore, journal, writer.submit, redactor)
 
     def snapshot() -> dict[str, Any]:
         return {
@@ -97,10 +100,7 @@ async def _serve(settings: Settings, keystore: Keystore, token: str, open_browse
                 "spooled_rows": writer.spooled_rows,
                 "rejected_rows": writer.rejected_rows,
             },
-            "exchanges": [
-                {"name": exchange, "status": "configured" if keys_present[exchange] else "not_configured"}
-                for exchange in EXCHANGES
-            ],
+            "exchanges": exchanges.snapshot(),
             "pairs": {"open": 0, "limit": 3},
         }
 
@@ -118,7 +118,9 @@ async def _serve(settings: Settings, keystore: Keystore, token: str, open_browse
 
     hub = Hub(snapshot, settings.ui)
     journal.add_sink(hub.push_event)
-    context = ApiContext(token=token, version=VERSION, hub=hub, snapshot=snapshot, journal=journal_events)
+    context = ApiContext(
+        token=token, version=VERSION, hub=hub, snapshot=snapshot, journal=journal_events, exchanges=exchanges
+    )
     app = create_app(settings.server, settings.paths.web_dist, context)
     server = _Server(
         uvicorn.Config(
@@ -134,7 +136,12 @@ async def _serve(settings: Settings, keystore: Keystore, token: str, open_browse
 
     journal.emit(Level.INFO, "app", "started", version=VERSION, pid=os.getpid())
     await writer.flush(force_connect=True)
-    background = [asyncio.create_task(writer.run()), asyncio.create_task(hub.run())]
+    background = [
+        asyncio.create_task(writer.run()),
+        asyncio.create_task(hub.run()),
+        asyncio.create_task(exchanges.run_monitor()),
+        asyncio.create_task(exchanges.check_all_with_keys()),
+    ]
     server_task = asyncio.create_task(server.serve())
     try:
         while not server.started and not server_task.done():
@@ -155,6 +162,7 @@ async def _serve(settings: Settings, keystore: Keystore, token: str, open_browse
             await asyncio.wait_for(asyncio.shield(server_task), SHUTDOWN_TIMEOUT_S)
         for task in background:
             task.cancel()
+        await exchanges.close()
         await hub.close()
         await writer.close()
         await database.close()
@@ -164,8 +172,10 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="ludik", description="Terminal Ludik")
     parser.add_argument("--config", type=Path, help="path to config.toml")
     parser.add_argument("--no-browser", action="store_true", help="do not open the browser")
+    parser.add_argument("--new-session", action="store_true", help="issue a new session token; open tabs must be reopened")
     args = parser.parse_args(argv)
 
+    use_system_trust_store()
     settings = load_settings(args.config)
     redactor = SecretRedactor()
     configure_logging(settings.paths.logs_dir, settings.logging.level, redactor)
@@ -183,10 +193,13 @@ def main(argv: list[str] | None = None) -> int:
         log.error("port %s is taken by another program; change [server] port in config.toml", settings.server.port)
         return 2
 
-    token = secrets.token_urlsafe(32)
-    keystore.set(SESSION_TOKEN, token)
+    # The token survives restarts so open tabs reconnect on their own; --new-session rotates it.
+    token = None if args.new_session else keystore.get(SESSION_TOKEN)
+    if not token:
+        token = secrets.token_urlsafe(32)
+        keystore.set(SESSION_TOKEN, token)
     try:
-        asyncio.run(_serve(settings, keystore, token, open_browser), loop_factory=loop_factory())
+        asyncio.run(_serve(settings, keystore, redactor, token, open_browser), loop_factory=loop_factory())
     except KeyboardInterrupt:
         pass
     return 0

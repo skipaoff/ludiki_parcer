@@ -15,10 +15,54 @@ export interface JournalEvent {
   payload: Record<string, unknown>;
 }
 
+export type KeysState = "none" | "saved" | "checking" | "ok" | "warning" | "rejected";
+
 export interface ExchangeState {
   name: string;
-  status: "not_configured" | "configured" | "connected" | "disconnected";
-  ping_ms?: number | null;
+  demo: boolean;
+  link: "unknown" | "up" | "down";
+  ping_ms: number | null;
+  clock_offset_ms: number | null;
+  clock_warning: boolean;
+  keys: KeysState;
+}
+
+export interface AccountFacts {
+  permissions: {
+    reading: boolean | null;
+    futures: boolean | null;
+    withdrawals: boolean | null;
+    ip_restricted: boolean | null;
+  };
+  one_way_position_mode: boolean | null;
+  wallet_usdt: string | null;
+  available_usdt: string | null;
+  taker_fee_pct: string | null;
+  maker_fee_pct: string | null;
+  ping_ms: number | null;
+  clock_offset_ms: number | null;
+  errors: string[];
+  notes: string[];
+}
+
+export interface CheckResult {
+  checked_at_ms: number;
+  accepted: boolean;
+  blocking: string[];
+  warnings: string[];
+  facts: AccountFacts;
+}
+
+export interface ExchangeDetails {
+  name: string;
+  demo: boolean;
+  link: ExchangeState["link"];
+  ping_ms: number | null;
+  clock_offset_ms: number | null;
+  probe_error: string | null;
+  key_masked: string | null;
+  keys: KeysState;
+  check: CheckResult | null;
 }
 
 export interface Snapshot {

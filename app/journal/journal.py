@@ -84,7 +84,7 @@ class Journal:
     ) -> JournalEvent:
         event = JournalEvent(self._clock(), level, source, type, exchange, trade_id, payload)
         self._recent.append(event)
-        log.log(_LOG_LEVELS[level], "%s.%s %s", source, type, payload or "")
+        log.log(_LOG_LEVELS[level], "%s.%s%s %s", source, type, f" [{exchange}]" if exchange else "", payload or "")
         for sink in self._sinks:
             try:
                 sink(event)

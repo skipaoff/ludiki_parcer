@@ -69,6 +69,23 @@ class UiSettings(_Section):
     journal_buffer: int = Field(default=500, ge=10)
 
 
+class BinanceSettings(_Section):
+    enabled: bool = True
+    demo: bool = False
+
+
+class MexcSettings(_Section):
+    enabled: bool = True
+
+
+class ExchangesSettings(_Section):
+    probe_interval_s: float = Field(default=10, ge=2)
+    request_timeout_s: float = Field(default=10, gt=0)
+    clock_warning_ms: int = Field(default=1000, ge=100)
+    binance: BinanceSettings = BinanceSettings()
+    mexc: MexcSettings = MexcSettings()
+
+
 class LoggingSettings(_Section):
     level: str = "INFO"
 
@@ -79,6 +96,7 @@ class Settings(_Section):
     database: DatabaseSettings = DatabaseSettings()
     storage: StorageSettings = StorageSettings()
     ui: UiSettings = UiSettings()
+    exchanges: ExchangesSettings = ExchangesSettings()
     logging: LoggingSettings = LoggingSettings()
 
 

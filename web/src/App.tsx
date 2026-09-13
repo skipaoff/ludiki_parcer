@@ -5,6 +5,7 @@
 // 2. Buttons that look active before their stage exists — unfinished actions are shown disabled with the reason.
 
 import { useEffect, useState } from "react";
+import { exchangeTitle, ExchangesSettings, signedMs } from "./Exchanges";
 import { clock, describe, uptime } from "./format";
 import { useLive, type LinkState } from "./live";
 import { apiGet } from "./session";
@@ -68,7 +69,7 @@ export function App({ token }: { token: string }) {
         {(tab === "funding" || tab === "unlocks") && <Placeholder text="Раздел появится после MVP." />}
         {tab === "trades" && <Placeholder text="История закрытых пар появится на этапе 6." />}
         {tab === "stats" && <Placeholder text="Статистика появится на этапе 7. Запись истории вилок — этап 4." />}
-        {tab === "settings" && <SettingsScreen snapshot={live.snapshot} now={now} />}
+        {tab === "settings" && <SettingsScreen token={token} snapshot={live.snapshot} now={now} />}
       </main>
 
       {journalOpen && <JournalPanel events={live.events} onClose={() => setJournalOpen(false)} />}
@@ -87,21 +88,31 @@ export function App({ token }: { token: string }) {
   );
 }
 
+const KEYS_NOTE: Record<ExchangeState["keys"], string | null> = {
+  none: "нет ключей",
+  saved: "ключ не проверен",
+  checking: "проверка ключа…",
+  ok: null,
+  warning: null,
+  rejected: "ключ не принят",
+};
+
 function ExchangeIndicator({ exchange }: { exchange: ExchangeState }) {
-  const name = exchange.name.toUpperCase();
-  if (exchange.status === "connected") {
-    return (
-      <span className="indicator">
-        ● {name} {exchange.ping_ms != null ? `${exchange.ping_ms}мс` : ""}
-      </span>
-    );
+  const title = exchangeTitle(exchange);
+  if (exchange.link === "down") {
+    return <span className="indicator blink">○ {title} нет связи</span>;
   }
-  if (exchange.status === "disconnected") {
-    return <span className="indicator blink">○ {name} нет связи</span>;
+  if (exchange.link === "unknown") {
+    return <span className="indicator muted">○ {title} …</span>;
   }
+  const note = KEYS_NOTE[exchange.keys];
   return (
-    <span className="indicator muted" title="Ключи добавляются в Настройках на этапе 1">
-      ○ {name} {exchange.status === "configured" ? "ключи есть" : "нет ключей"}
+    <span className="indicator">
+      ● {title} {exchange.ping_ms}мс
+      {exchange.clock_warning && exchange.clock_offset_ms != null && (
+        <span className="action"> · часы {signedMs(exchange.clock_offset_ms)}</span>
+      )}
+      {note && <span className={exchange.keys === "rejected" ? "action" : "muted"}> · {note}</span>}
     </span>
   );
 }
@@ -162,19 +173,10 @@ function GapsScreen({ snapshot }: { snapshot: Snapshot | null }) {
   );
 }
 
-function SettingsScreen({ snapshot, now }: { snapshot: Snapshot | null; now: number }) {
+function SettingsScreen({ token, snapshot, now }: { token: string; snapshot: Snapshot | null; now: number }) {
   return (
     <div className="settings">
-      <section>
-        <h2>Биржи и ключи</h2>
-        {snapshot?.exchanges.map((exchange) => (
-          <div className="row" key={exchange.name}>
-            <span>{exchange.name.toUpperCase()}</span>
-            <span className="muted">{exchange.status === "not_configured" ? "ключи не добавлены" : "ключи есть"}</span>
-          </div>
-        ))}
-        <p className="muted">Ввод ключей и кнопка «Проверить» — этап 1. Ключи хранятся в Диспетчере учётных данных Windows.</p>
-      </section>
+      <ExchangesSettings token={token} live={snapshot?.exchanges} />
       <section>
         <h2>Торговля</h2>
         <p className="muted">Размер, плечо, пороги и риск-лимиты — этапы 3 и 6.</p>

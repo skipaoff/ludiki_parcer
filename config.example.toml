@@ -35,5 +35,17 @@ heartbeat_interval_s = 5
 heartbeat_timeout_s = 15
 journal_buffer = 500
 
+[exchanges]
+probe_interval_s = 10       # public ping and clock check of every exchange
+request_timeout_s = 10
+clock_warning_ms = 1000     # warn when the local clock drifts further from an exchange
+
+[exchanges.binance]
+enabled = true
+demo = false                # true: Binance demo trading (demo-fapi.binance.com) with separate demo keys
+
+[exchanges.mexc]
+enabled = true
+
 [logging]
 level = "INFO"

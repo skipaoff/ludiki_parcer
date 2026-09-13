@@ -26,9 +26,27 @@ export function takeSessionToken(): string | null {
 }
 
 export async function apiGet<T>(path: string, token: string): Promise<T> {
-  const response = await fetch(path, { headers: { Authorization: `Bearer ${token}` } });
+  return apiSend<T>("GET", path, token);
+}
+
+export async function apiSend<T>(method: string, path: string, token: string, body?: unknown): Promise<T> {
+  const response = await fetch(path, {
+    method,
+    headers: {
+      Authorization: `Bearer ${token}`,
+      ...(body === undefined ? {} : { "Content-Type": "application/json" }),
+    },
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
   if (!response.ok) {
-    throw new Error(`${path}: ${response.status}`);
+    let detail = `${response.status}`;
+    try {
+      const data = (await response.json()) as { detail?: string };
+      if (data.detail) detail = data.detail;
+    } catch {
+      // not JSON
+    }
+    throw new Error(detail);
   }
   return (await response.json()) as T;
 }

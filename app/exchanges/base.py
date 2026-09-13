@@ -6,8 +6,8 @@ Anti-goal:
 2. Exchange-native units leaking out — books, positions and fills leave the adapter per token.
 3. Retry or circuit-breaker logic mixed into adapter methods — resilience wraps the adapter as a separate layer.
 
-Draft for stage 1 (docs/PLAN.md, section 14). Implementations will sit on ccxt, with direct
-websocket connections where ccxt is slower than needed.
+Stage 1 implements close, probe_clock and check_account; the rest is the draft for stages 2–6
+(docs/PLAN.md, section 14). Trading and private data sit on ccxt, public market streams on our own websocket clients.
 """
 
 from __future__ import annotations
@@ -16,7 +16,17 @@ from dataclasses import dataclass
 from decimal import Decimal
 from typing import AsyncIterator, Protocol
 
+from app.core.account import AccountFacts
 from app.core.schemas import Book, Instrument, LegSide
+
+
+@dataclass(frozen=True, slots=True)
+class ClockProbe:
+    """One public round trip: how long it took and how far the exchange clock is from ours."""
+
+    ping_ms: int
+    clock_offset_ms: int
+    server_ts_ms: int
 
 
 @dataclass(frozen=True, slots=True)
@@ -34,16 +44,6 @@ class MarkIndex:
     mark_price: Decimal
     index_price: Decimal | None
     ts_ms: int
-
-
-@dataclass(frozen=True, slots=True)
-class AccountCheck:
-    balance_usdt: Decimal
-    withdrawals_enabled: bool | None
-    one_way_position_mode: bool
-    taker_fee_pct: Decimal
-    ping_ms: int
-    clock_offset_ms: int
 
 
 @dataclass(frozen=True, slots=True)
@@ -72,11 +72,15 @@ class OrderReport:
 class ExchangeAdapter(Protocol):
     name: str
 
-    async def start(self) -> None: ...
+    async def close(self) -> None: ...
 
-    async def stop(self) -> None: ...
+    async def probe_clock(self) -> ClockProbe:
+        """Public, no keys needed."""
+        ...
 
-    async def check_account(self) -> AccountCheck: ...
+    async def check_account(self) -> AccountFacts:
+        """Needs keys. Every step that fails is recorded in AccountFacts.errors instead of raising."""
+        ...
 
     async def load_instruments(self) -> list[Instrument]: ...
 
