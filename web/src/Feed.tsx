@@ -7,6 +7,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { compact } from "./Pairs";
+import { PortfolioColumn } from "./Portfolio";
 import { apiSend } from "./session";
 import type { FeedRow, FeedView, Snapshot } from "./types";
 
@@ -263,17 +264,7 @@ export function FeedScreen({ token, snapshot }: { token: string; snapshot: Snaps
           )}
         </div>
       </section>
-      <aside className="pairs">
-        <div className="toolbar">
-          <span>
-            ОТКРЫТЫЕ ПАРЫ {snapshot?.pairs.open ?? 0}/{snapshot?.pairs.limit ?? 0}
-          </span>
-          <button className="action" disabled title="Торговля появится на этапе 6">
-            [ЗАКРЫТЬ ВСЁ]
-          </button>
-        </div>
-        <p className="empty muted">Открытых пар нет.</p>
-      </aside>
+      <PortfolioColumn token={token} snapshot={snapshot} />
     </div>
   );
 }

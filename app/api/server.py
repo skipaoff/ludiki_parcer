@@ -26,6 +26,7 @@ from app.api.hub import Hub
 from app.config.settings import ServerSettings
 from app.exchanges.service import ExchangeService, InvalidKeys, UnknownExchange
 from app.instruments.service import InstrumentService, UnknownPair
+from app.portfolio.service import PortfolioError, PortfolioService
 from app.strategies.price_gap.settings import FeedSettingsService, InvalidSetting
 
 APP_NAME = "terminal-ludik"
@@ -57,6 +58,7 @@ class ApiContext:
     instruments: InstrumentService | None = None
     feed_settings: FeedSettingsService | None = None
     history: HistoryQueries | None = None
+    portfolio: PortfolioService | None = None
 
 
 def allowed_origins(server: ServerSettings) -> frozenset[str]:
@@ -184,6 +186,36 @@ def create_app(server: ServerSettings, web_dist: Path, context: ApiContext) -> F
     @app.get("/api/history/storage", dependencies=[Depends(require_token)])
     async def history_storage() -> dict[str, Any]:
         return await database_call(history().storage())
+
+    def portfolio() -> PortfolioService:
+        if context.portfolio is None:
+            raise HTTPException(status_code=503, detail="portfolio is not available")
+        return context.portfolio
+
+    @app.get("/api/portfolio", dependencies=[Depends(require_token)])
+    async def get_portfolio() -> dict[str, Any]:
+        return portfolio().snapshot()
+
+    @app.post("/api/portfolio/pairs", dependencies=[Depends(require_token)])
+    async def assign_pair(request: Request) -> dict[str, Any]:
+        try:
+            body = orjson.loads(await request.body())
+            legs = [body["long"]["exchange"], body["long"]["symbol"], body["short"]["exchange"], body["short"]["symbol"]]
+            if not all(isinstance(value, str) for value in legs):
+                raise TypeError
+        except (orjson.JSONDecodeError, KeyError, TypeError):
+            raise HTTPException(status_code=400, detail="expected long and short legs with exchange and symbol") from None
+        try:
+            return await portfolio().assign_pair(*legs)
+        except PortfolioError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from None
+
+    @app.post("/api/portfolio/trades/{trade_id}/close-record", dependencies=[Depends(require_token)])
+    async def close_record(trade_id: int) -> dict[str, Any]:
+        try:
+            return await portfolio().close_record(trade_id)
+        except PortfolioError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from None
 
     @app.get("/api/feed/settings", dependencies=[Depends(require_token)])
     async def get_feed_settings() -> dict[str, str]:

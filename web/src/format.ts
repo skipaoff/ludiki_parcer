@@ -51,6 +51,20 @@ export function describe(event: JournalEvent): string {
       const warnings = Array.isArray(payload.warnings) ? payload.warnings : [];
       return `${exchangeName(event)} ключ принят${warnings.length ? ` · замечания: ${warnings.join(", ")}` : ""}`;
     }
+    case "portfolio.leg_lost":
+      return `${String(payload.token)} · НОГА ПОТЕРЯНА · ${(Array.isArray(payload.issues) ? payload.issues : []).join(", ")}`;
+    case "portfolio.leg_found":
+      return `${String(payload.token)} · нога снова видна на бирже`;
+    case "portfolio.pair_assigned":
+      return `${String(payload.token)} · пара взята под наблюдение · ${String(payload.qty_tokens)} токенов`;
+    case "portfolio.record_closed":
+      return `${String(payload.token)} · запись о паре закрыта`;
+    case "portfolio.restored":
+      return `восстановлено открытых пар: ${String(payload.pairs)}`;
+    case "portfolio.liquidation_near":
+      return `${String(payload.token)} · до ликвидации ${String(payload.distance_pct)}%`;
+    case "history.dangling_episodes_closed":
+      return `закрыто незавершённых вилок прошлого запуска: ${String(payload.count)}`;
     case "settings.changed":
       return `настройка ${String(payload.key)}: ${String(payload.old)} → ${String(payload.new)}`;
     case "instruments.refreshed":

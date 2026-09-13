@@ -11,15 +11,15 @@ Endpoints and response shapes: docs/EXCHANGES.md, section MEXC. ccxt 4.5.78 uses
 from __future__ import annotations
 
 from decimal import Decimal
-from typing import Any
+from typing import Any, Mapping
 
 import ccxt.async_support as ccxt
 
 from app.core.account import AccountFacts, KeyPermissions, clock_offset_ms
 from app.core.pairs import Quote
-from app.core.schemas import Instrument
+from app.core.schemas import Instrument, LegSide
 from app.core.symbols import parse_symbol
-from app.exchanges.base import ClockProbe
+from app.exchanges.base import Balance, ClockProbe, Position
 from app.exchanges.ccxt_support import now_ms, parse, step
 
 FEE_REFERENCE_SYMBOL = "BTC_USDT"
@@ -100,6 +100,73 @@ def _positive(value: Any) -> Decimal | None:
     return number if number is not None and number > 0 else None
 
 
+POSITION_SIDES = {1: LegSide.LONG, 2: LegSide.SHORT}
+MARGIN_MODES = {1: "isolated", 2: "cross"}
+
+
+def parse_positions(raw: dict[str, Any], instruments: Mapping[str, Instrument]) -> list[Position]:
+    """
+    GET /api/v1/private/position/open_positions — holdVol in contracts, positionType 1 long / 2 short,
+    openType 1 isolated / 2 cross, prices per base unit (1000BONK_USDT: per 1000 BONK). MEXC gives no mark price here.
+    """
+    positions = []
+    for item in unwrap(raw) or []:
+        instrument = instruments.get(item.get("symbol", ""))
+        volume = _decimal(item.get("holdVol")) or Decimal(0)
+        side = POSITION_SIDES.get(int(item.get("positionType") or 0))
+        if instrument is None or volume <= 0 or side is None:
+            continue
+        unit_price = instrument.price_unit_tokens
+        entry = _decimal(item.get("holdAvgPrice") or item.get("openAvgPrice")) or Decimal(0)
+        liquidation = _positive(item.get("liquidatePrice"))
+        positions.append(
+            Position(
+                exchange="mexc",
+                symbol_raw=item["symbol"],
+                token=instrument.token,
+                side=side,
+                qty_tokens=volume * instrument.qty_unit_tokens,
+                entry_price=entry / unit_price,
+                mark_price=None,
+                liquidation_price=liquidation / unit_price if liquidation else None,
+                leverage=int(item["leverage"]) if item.get("leverage") else None,
+                margin_mode=MARGIN_MODES.get(int(item.get("openType") or 0)),
+                updated_ms=int(item.get("updateTime") or 0),
+            )
+        )
+    return positions
+
+
+def parse_balance(raw: dict[str, Any]) -> Balance:
+    """GET /api/v1/private/account/assets — USDT equity, available balance and margin held by positions and orders."""
+    for item in unwrap(raw) or []:
+        if item.get("currency") == "USDT":
+            margin = (_decimal(item.get("positionMargin")) or Decimal(0)) + (_decimal(item.get("frozenBalance")) or Decimal(0))
+            return Balance(
+                exchange="mexc",
+                equity_usd=_decimal(item.get("equity")) or Decimal(0),
+                available_usd=_decimal(item.get("availableBalance")) or Decimal(0),
+                margin_used_usd=margin,
+            )
+    return Balance("mexc", Decimal(0), Decimal(0), Decimal(0))
+
+
+def parse_funding(raw: dict[str, Any], since_ms: int) -> tuple[Decimal, bool]:
+    """
+    GET /api/v1/private/position/funding_records — (sum of funding since the moment, whether older pages may hold more).
+    Records come newest first; positive funding was received.
+    """
+    data = unwrap(raw) or {}
+    records = data.get("resultList") or []
+    total = sum(
+        (_decimal(item.get("funding")) or Decimal(0) for item in records if int(item.get("settleTime") or 0) >= since_ms),
+        Decimal(0),
+    )
+    oldest = min((int(item.get("settleTime") or 0) for item in records), default=0)
+    more = bool(records) and oldest >= since_ms and int(data.get("currentPage") or 1) < int(data.get("totalPage") or 1)
+    return total, more
+
+
 def parse_one_way(raw: dict[str, Any]) -> bool | None:
     """GET /api/v1/private/position/position_mode."""
     data = unwrap(raw)
@@ -157,6 +224,24 @@ class MexcAdapter:
 
     async def fetch_quotes(self) -> dict[str, Quote]:
         return parse_quotes(await self._client.contract_public_get_ticker())
+
+    async def fetch_positions(self, instruments: Mapping[str, Instrument]) -> list[Position]:
+        return parse_positions(await self._client.contract_private_get_position_open_positions(), instruments)
+
+    async def fetch_balance(self) -> Balance:
+        return parse_balance(await self._client.contract_private_get_account_assets())
+
+    async def fetch_funding_usd(self, symbol_raw: str, since_ms: int) -> Decimal:
+        total = Decimal(0)
+        for page in range(1, 21):
+            raw = await self._client.contract_private_get_position_funding_records(
+                {"symbol": symbol_raw, "page_num": page, "page_size": 100}
+            )
+            amount, more = parse_funding(raw, since_ms)
+            total += amount
+            if not more:
+                break
+        return total
 
     async def probe_clock(self) -> ClockProbe:
         sent = now_ms()

@@ -104,6 +104,8 @@ class Database:
                     max_size=4,
                     timeout=self._settings.connect_timeout_s,
                     init=_init_connection,
+                    # Server messages in English: localized ones arrive in the cluster's code page and become unreadable in logs.
+                    server_settings={"lc_messages": "C"},
                 )
                 async with pool.acquire() as connection:
                     applied = await migrate(connection, self._migrations_dir)

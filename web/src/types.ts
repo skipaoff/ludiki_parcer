@@ -143,8 +143,47 @@ export interface FeedView {
   streams?: Record<string, Record<string, number>>;
 }
 
+export interface TradeCard {
+  id: string;
+  token: string;
+  status: "opening" | "open" | "closing" | "leg_lost" | "closed";
+  issues: string[];
+  long: { exchange: string; symbol: string; entry: string | null };
+  short: { exchange: string; symbol: string; entry: string | null };
+  qty_tokens: string | null;
+  opened_at_ms: number;
+  fees_usd: string | null;
+  funding_usd: string | null;
+  entry_spread_pct?: string | null;
+  exit_spread_pct?: string | null;
+  pnl_now_usd?: string | null;
+  liq_worst_pct?: string | null;
+  liq_long_pct?: string | null;
+  liq_short_pct?: string | null;
+  book_age_ms?: number | null;
+}
+
+export interface PositionView {
+  exchange: string;
+  symbol: string;
+  token: string;
+  side: "long" | "short";
+  qty_tokens: string | null;
+  entry: string | null;
+  liquidation: string | null;
+  leverage: number | null;
+}
+
+export interface PortfolioView {
+  trades: TradeCard[];
+  foreign: PositionView[];
+  suggestions: { token: string; long: PositionView; short: PositionView }[];
+  accounts: Record<string, { polled_ms: number | null; error: string | null; positions: number; equity_usd: string | null; available_usd: string | null }>;
+}
+
 export interface Snapshot {
   app: { version: string; started_ts_ms: number };
+  portfolio?: PortfolioView;
   instruments?: InstrumentsSummary;
   feed?: FeedView;
   history?: { recorded: number; open: number; radar_snapshots: number };
@@ -156,7 +195,7 @@ export interface Snapshot {
     rejected_rows: number;
   };
   exchanges: ExchangeState[];
-  pairs: { open: number; limit: number };
+  pairs: { open: number; limit: number; sleep_blocked?: boolean };
 }
 
 export type ServerMessage =

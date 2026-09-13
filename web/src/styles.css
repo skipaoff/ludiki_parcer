@@ -279,6 +279,44 @@ a:hover {
   color: var(--muted);
 }
 
+.pair-card {
+  padding: 0.6rem 1rem;
+  border-bottom: 1px solid var(--line);
+}
+
+.pair-card.alarm {
+  border-left: 2px solid var(--alarm);
+}
+
+.pair-card.alarm .row-line:last-child span {
+  color: var(--alarm);
+}
+
+.row-line {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  white-space: nowrap;
+}
+
+.card-section {
+  padding: 0.5rem 1rem;
+  border-bottom: 1px solid var(--line);
+}
+
+.card-section .pair-card {
+  padding: 0.4rem 0;
+}
+
+.section-caption {
+  color: var(--muted);
+  margin-bottom: 0.25rem;
+}
+
+.alarm-text {
+  color: var(--alarm);
+}
+
 .settings-form input {
   width: 4.5rem;
   margin: 0 0.25rem;

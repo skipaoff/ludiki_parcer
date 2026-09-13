@@ -12,15 +12,15 @@ from __future__ import annotations
 
 import asyncio
 from decimal import Decimal
-from typing import Any
+from typing import Any, Mapping
 
 import ccxt.async_support as ccxt
 
 from app.core.account import AccountFacts, KeyPermissions, clock_offset_ms
 from app.core.pairs import Quote
-from app.core.schemas import Instrument
+from app.core.schemas import Instrument, LegSide
 from app.core.symbols import parse_symbol
-from app.exchanges.base import ClockProbe
+from app.exchanges.base import Balance, ClockProbe, Position
 from app.exchanges.ccxt_support import now_ms, parse, step, to_bool
 
 FEE_REFERENCE_SYMBOL = "BTCUSDT"
@@ -99,6 +99,61 @@ def _positive(value: Any) -> Decimal | None:
     return number if number > 0 else None
 
 
+def parse_positions(raw: list[dict[str, Any]], instruments: Mapping[str, Instrument]) -> list[Position]:
+    """
+    GET /fapi/v2/positionRisk — one-way mode rows (positionSide BOTH); the sign of positionAmt is the side.
+    positionAmt is in contract units (1000PEPEUSDT: lots of 1000 PEPE) and prices are per unit; converted per token.
+    """
+    positions = []
+    for item in raw:
+        amount = Decimal(str(item.get("positionAmt") or "0"))
+        instrument = instruments.get(item.get("symbol", ""))
+        if amount == 0 or instrument is None:
+            continue
+        unit_price = instrument.price_unit_tokens
+        liquidation = _positive(item.get("liquidationPrice"))
+        mark = _positive(item.get("markPrice"))
+        margin = str(item.get("marginType") or "").lower() or None
+        positions.append(
+            Position(
+                exchange="binance",
+                symbol_raw=item["symbol"],
+                token=instrument.token,
+                side=LegSide.LONG if amount > 0 else LegSide.SHORT,
+                qty_tokens=abs(amount) * instrument.qty_unit_tokens,
+                entry_price=Decimal(str(item["entryPrice"])) / unit_price,
+                mark_price=mark / unit_price if mark else None,
+                liquidation_price=liquidation / unit_price if liquidation else None,
+                leverage=int(item["leverage"]) if item.get("leverage") else None,
+                margin_mode=margin if margin in ("isolated", "cross") else None,
+                updated_ms=int(item.get("updateTime") or 0),
+            )
+        )
+    return positions
+
+
+def parse_balance(raw: dict[str, Any]) -> Balance:
+    """GET /fapi/v3/account — margin balance (wallet plus unrealized PnL), available balance and initial margin in use."""
+    return Balance(
+        exchange="binance",
+        equity_usd=Decimal(str(raw["totalMarginBalance"])),
+        available_usd=Decimal(str(raw["availableBalance"])),
+        margin_used_usd=Decimal(str(raw.get("totalInitialMargin") or "0")),
+    )
+
+
+def parse_funding(raw: list[dict[str, Any]], since_ms: int) -> Decimal:
+    """GET /fapi/v1/income?incomeType=FUNDING_FEE — positive income was received, negative was paid."""
+    return sum(
+        (
+            Decimal(str(item["income"]))
+            for item in raw
+            if item.get("incomeType") == "FUNDING_FEE" and int(item.get("time") or 0) >= since_ms
+        ),
+        Decimal(0),
+    )
+
+
 def parse_permissions(raw: dict[str, Any]) -> KeyPermissions:
     """GET /sapi/v1/account/apiRestrictions."""
     return KeyPermissions(
@@ -168,6 +223,18 @@ class BinanceAdapter:
             self._client.fapipublic_get_ticker_24hr(),
         )
         return parse_quotes(premium, books, tickers)
+
+    async def fetch_positions(self, instruments: Mapping[str, Instrument]) -> list[Position]:
+        return parse_positions(await self._client.fapiprivatev2_get_positionrisk(), instruments)
+
+    async def fetch_balance(self) -> Balance:
+        return parse_balance(await self._client.fapiprivatev3_get_account())
+
+    async def fetch_funding_usd(self, symbol_raw: str, since_ms: int) -> Decimal:
+        raw = await self._client.fapiprivate_get_income(
+            {"symbol": symbol_raw, "incomeType": "FUNDING_FEE", "startTime": since_ms, "limit": 1000}
+        )
+        return parse_funding(raw, since_ms)
 
     async def probe_clock(self) -> ClockProbe:
         sent = now_ms()

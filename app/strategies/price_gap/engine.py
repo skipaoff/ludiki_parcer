@@ -96,8 +96,10 @@ class PriceGapEngine:
         on_radar_symbols: Callable[[list[str]], None],
         clock_ms: Callable[[], float] = lambda: time.time() * 1000,
         sink: EpisodeSink | None = None,
+        pinned: Callable[[], list[str]] = lambda: [],
     ) -> None:
         self._sink: EpisodeSink = sink or NullSink()
+        self._pinned = pinned
         self._catalog = catalog
         self._state = state
         self._feeds = {"binance": binance, "mexc": mexc}
@@ -147,7 +149,7 @@ class PriceGapEngine:
         if not self._records:
             return
         self._tops = self._radar(now)
-        if self._tops and now - self._last_choose_ms >= CHOOSE_EVERY_MS:
+        if (self._tops or self._pinned()) and now - self._last_choose_ms >= CHOOSE_EVERY_MS:
             self._choose(now)
             self._last_choose_ms = now
         for key in list(self._books):
@@ -198,7 +200,8 @@ class PriceGapEngine:
         tracking = [self._episode_pair[key] for key, episode in by_peak if episode.phase is Phase.TRACKING][
             : self._settings.tracking_limit
         ]
-        watched = in_feed + tracking
+        # Open pairs come first: their exit spread and PnL depend on these books.
+        watched = [key for key in self._pinned() if key in self._records] + in_feed + tracking
         threshold = float(self._settings.min_roi_pct - self._settings.candidate_margin_pct)
         candidates = [top.key for top in self._tops if top.roi_net_pct >= threshold]
         radar = [top.key for top in self._tops[: self._settings.radar_rows]]

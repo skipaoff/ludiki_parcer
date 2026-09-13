@@ -112,6 +112,14 @@ class FeedSettings(_Section):
     mexc_ticker_poll_ms: int = Field(default=1000, ge=500)
 
 
+class PortfolioSettings(_Section):
+    positions_poll_s: float = Field(default=5, ge=1)
+    balances_poll_s: float = Field(default=60, ge=10)
+    funding_poll_s: float = Field(default=300, ge=60)
+    liquidation_warning_pct: Decimal = Field(default=Decimal("10"), gt=0)
+    max_open_pairs: int = Field(default=3, ge=1)
+
+
 class LoggingSettings(_Section):
     level: str = "INFO"
 
@@ -125,6 +133,7 @@ class Settings(_Section):
     exchanges: ExchangesSettings = ExchangesSettings()
     instruments: InstrumentsSettings = InstrumentsSettings()
     feed: FeedSettings = FeedSettings()
+    portfolio: PortfolioSettings = PortfolioSettings()
     logging: LoggingSettings = LoggingSettings()
 
 

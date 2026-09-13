@@ -54,9 +54,17 @@
 
 Демо-торговля: `enable_demo_trading(True)` переключает fapi на `demo-fapi.binance.com` [ccxt]. У демо нет `sapi`, поэтому права ключа не запрашиваются; демо-ключи хранятся отдельно (`binance-demo:*`).
 
-### Приватная часть (через ccxt) [проверить, этапы 5, 6]
+### Позиции, баланс, фандинг (этап 5) [док, проверить с ключами]
 
-- Позиции, цена ликвидации.
+| Эндпоинт | Метод ccxt | Что берём |
+|---|---|---|
+| `GET /fapi/v2/positionRisk` | `fapiprivatev2_get_positionrisk` | `positionAmt` (знак — сторона, в единицах контракта), `entryPrice`, `markPrice`, `liquidationPrice` (за единицу котировки), `leverage`, `marginType`, `updateTime`. v2 выбран, потому что v3 не отдаёт плечо и тип маржи |
+| `GET /fapi/v3/account` | `fapiprivatev3_get_account` | `totalMarginBalance`, `availableBalance`, `totalInitialMargin` |
+| `GET /fapi/v1/income?incomeType=FUNDING_FEE` | `fapiprivate_get_income` | сумма `income` с момента открытия пары |
+
+### Приватная часть (через ccxt) [проверить, этап 6]
+
+- Цена ликвидации в потоке `ACCOUNT_UPDATE` не приходит — берётся из REST.
 - Плечо и режим маржи по символу.
 - Комиссия аккаунта по символу.
 - Рыночный ордер с `reduceOnly` и `newClientOrderId`. У ccxt есть `create_order_ws` для отправки ордера через торговый вебсокет [ccxt].
@@ -100,6 +108,14 @@
 | `GET /api/v1/contract/detail?symbol=BTC_USDT` | `contract_public_get_detail` | запасной источник ставок по умолчанию: `takerFeeRate`, `makerFeeRate` |
 
 Права ключа для фьючерсов MEXC не отдаёт, поэтому в проверке они «неизвестно» и висит предупреждение: вывод у ключа выключается вручную при выпуске.
+
+### Позиции, баланс, фандинг (этап 5) [док, проверить с ключами]
+
+| Эндпоинт | Метод ccxt | Что берём |
+|---|---|---|
+| `GET /api/v1/private/position/open_positions` | `contract_private_get_position_open_positions` | `holdVol` (контракты), `positionType` 1 лонг / 2 шорт, `holdAvgPrice`, `liquidatePrice`, `leverage`, `openType` 1 изолированная / 2 кросс. Mark цены в ответе нет — берётся `fairPrice` из опроса тикеров |
+| `GET /api/v1/private/account/assets` | `contract_private_get_account_assets` | USDT: `equity`, `availableBalance`, `positionMargin` + `frozenBalance` |
+| `GET /api/v1/private/position/funding_records` | `contract_private_get_position_funding_records` | `resultList[].funding` с `settleTime` не раньше открытия пары, постранично до 20 страниц |
 
 ### Вебсокеты
 

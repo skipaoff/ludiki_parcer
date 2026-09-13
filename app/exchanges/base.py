@@ -14,7 +14,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from decimal import Decimal
-from typing import AsyncIterator, Protocol
+from typing import AsyncIterator, Mapping, Protocol
 
 from app.core.account import AccountFacts
 from app.core.pairs import Quote
@@ -49,12 +49,27 @@ class MarkIndex:
 
 @dataclass(frozen=True, slots=True)
 class Position:
+    """An open position per token: quantity in tokens, prices per token, whatever the contract's units."""
+
+    exchange: str
     symbol_raw: str
+    token: str
     side: LegSide
     qty_tokens: Decimal
     entry_price: Decimal
-    mark_price: Decimal
+    mark_price: Decimal | None
     liquidation_price: Decimal | None
+    leverage: int | None = None
+    margin_mode: str | None = None  # isolated | cross
+    updated_ms: int = 0
+
+
+@dataclass(frozen=True, slots=True)
+class Balance:
+    exchange: str
+    equity_usd: Decimal
+    available_usd: Decimal
+    margin_used_usd: Decimal
 
 
 @dataclass(frozen=True, slots=True)
@@ -112,10 +127,18 @@ class ExchangeAdapter(Protocol):
 
     async def fetch_order(self, symbol_raw: str, client_order_id: str) -> OrderReport: ...
 
-    async def fetch_positions(self) -> list[Position]: ...
+    async def fetch_positions(self, instruments: Mapping[str, Instrument]) -> list[Position]:
+        """Needs keys. Non-zero positions of contracts found in instruments (keyed by raw symbol), per token."""
+        ...
+
+    async def fetch_balance(self) -> Balance:
+        """Needs keys. USDT futures account totals."""
+        ...
+
+    async def fetch_funding_usd(self, symbol_raw: str, since_ms: int) -> Decimal:
+        """Needs keys. Net funding received (positive) or paid (negative) on a contract since a moment."""
+        ...
 
     def watch_positions(self) -> AsyncIterator[Position]: ...
 
     def watch_orders(self) -> AsyncIterator[OrderReport]: ...
-
-    async def fetch_funding_usd(self, symbol_raw: str, since_ms: int) -> Decimal: ...

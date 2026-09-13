@@ -70,5 +70,12 @@ default_taker_fee_binance_pct = 0.05   # used until an accepted key check report
 default_taker_fee_mexc_pct = 0.05
 mexc_ticker_poll_ms = 1000      # MEXC best prices come from REST: the all-symbols websocket has no bid/ask
 
+[portfolio]
+positions_poll_s = 5            # positions from REST; needs keys
+balances_poll_s = 60
+funding_poll_s = 300
+liquidation_warning_pct = 10    # warn when a leg is this close to its liquidation price
+max_open_pairs = 3
+
 [logging]
 level = "INFO"

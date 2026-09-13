@@ -35,6 +35,8 @@ from app.market.binance_streams import BinanceStreams
 from app.market.mexc_market import MexcMarket
 from app.market.state import MarketState
 from app.market.radar_recorder import RadarRecorder
+from app.portfolio.service import PortfolioService
+from app.system.keep_awake import KeepAwake
 from app.storage import history as history_queries
 from app.strategies.price_gap.engine import PriceGapEngine
 from app.strategies.price_gap.recorder import EpisodeRecorder
@@ -123,6 +125,25 @@ async def _serve(
             "exit_after_ms": current.exit_after_ms,
         }
 
+    keep_awake = KeepAwake()
+
+    def on_active_pairs(active: bool) -> None:
+        if active:
+            keep_awake.hold()
+        else:
+            keep_awake.release()
+
+    portfolio = PortfolioService(
+        exchanges,
+        instruments,
+        market,
+        database,
+        writer.submit,
+        journal,
+        settings.portfolio,
+        taker_fee_pct,
+        on_active_change=on_active_pairs,
+    )
     recorder = EpisodeRecorder(writer.submit, feed_snapshot)
     engine = PriceGapEngine(
         instruments,
@@ -133,6 +154,7 @@ async def _serve(
         taker_fee_pct,
         binance_streams.set_radar,
         sink=recorder,
+        pinned=portfolio.pinned_pair_keys,
     )
     feed_settings = FeedSettingsService(engine, database, journal)
     radar_recorder = RadarRecorder(instruments, market, writer.submit)
@@ -161,7 +183,8 @@ async def _serve(
             "instruments": instruments.summary(),
             "feed": {**engine.view(), "streams": {"binance": binance_streams.stats(), "mexc": mexc_market.stats()}},
             "history": {"recorded": recorder.recorded, "open": recorder.open_count, "radar_snapshots": radar_recorder.snapshots},
-            "pairs": {"open": 0, "limit": 3},
+            "pairs": {"open": portfolio.open_count, "limit": settings.portfolio.max_open_pairs, "sleep_blocked": keep_awake.held},
+            "portfolio": portfolio.snapshot(),
         }
 
     async def journal_events(limit: int) -> list[dict[str, Any]]:
@@ -188,6 +211,7 @@ async def _serve(
         instruments=instruments,
         feed_settings=feed_settings,
         history=History(),
+        portfolio=portfolio,
     )
     app = create_app(settings.server, settings.paths.web_dist, context)
     server = _Server(
@@ -209,6 +233,7 @@ async def _serve(
         closed = await history_queries.close_dangling_episodes(database.pool)
         if closed:
             journal.emit(Level.WARNING, "history", "dangling_episodes_closed", count=closed)
+        await portfolio.load()
     background = [
         asyncio.create_task(writer.run()),
         asyncio.create_task(hub.run()),
@@ -219,6 +244,10 @@ async def _serve(
         asyncio.create_task(mexc_market.run()),
         asyncio.create_task(engine.run()),
         asyncio.create_task(radar_recorder.run()),
+        asyncio.create_task(portfolio.run_positions()),
+        asyncio.create_task(portfolio.run_balances()),
+        asyncio.create_task(portfolio.run_funding()),
+        asyncio.create_task(portfolio.run_metrics()),
     ]
     server_task = asyncio.create_task(server.serve())
     try:
@@ -245,6 +274,7 @@ async def _serve(
         await hub.close()
         await writer.close()
         await database.close()
+        keep_awake.release()
 
 
 def main(argv: list[str] | None = None) -> int:
