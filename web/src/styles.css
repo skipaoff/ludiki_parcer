@@ -1,0 +1,222 @@
+/* VFP: The terminal's look — black ground, white and grey monospace text, red only for emergencies (PLAN.md, section 3.6).
+   Changes when: the visual style is revised.
+   Anti-goal:
+   1. Shadows, rounded corners, decorative icons or animations other than the connection blink. */
+
+:root {
+  --bg: #000;
+  --fg: #fff;
+  --muted: #8a8a8a;
+  --line: #262626;
+  --alarm: #ff3b30;
+  color-scheme: dark;
+}
+
+* {
+  box-sizing: border-box;
+  border-radius: 0;
+  box-shadow: none;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+  background: var(--bg);
+  color: var(--fg);
+  font: 13px/1.45 "JetBrains Mono", "Cascadia Mono", Consolas, monospace;
+  font-variant-numeric: tabular-nums;
+}
+
+button {
+  font: inherit;
+  color: inherit;
+  background: none;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+}
+
+button:disabled {
+  color: var(--muted);
+  cursor: not-allowed;
+}
+
+.muted {
+  color: var(--muted);
+}
+
+.screen {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+.centered {
+  align-items: center;
+  justify-content: center;
+  gap: 0.25rem;
+}
+
+.header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 1rem;
+  padding: 0.5rem 1rem;
+  border-bottom: 1px solid var(--line);
+  white-space: nowrap;
+  overflow-x: auto;
+}
+
+.tabs {
+  display: flex;
+  gap: 1.5rem;
+}
+
+.tab {
+  color: var(--muted);
+}
+
+.tab.active {
+  color: var(--fg);
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.indicators {
+  display: flex;
+  gap: 1.5rem;
+}
+
+.banner {
+  padding: 0.25rem 1rem;
+  border-bottom: 1px solid var(--line);
+  text-transform: uppercase;
+}
+
+.banner.alarm {
+  color: var(--alarm);
+}
+
+.blink {
+  animation: blink 1s steps(1) infinite;
+}
+
+@keyframes blink {
+  50% {
+    opacity: 0.35;
+  }
+}
+
+.body {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+
+.body.stale {
+  opacity: 0.5;
+}
+
+.gaps {
+  display: grid;
+  grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
+  height: 100%;
+}
+
+.feed {
+  border-right: 1px solid var(--line);
+  overflow: auto;
+}
+
+.pairs {
+  overflow: auto;
+}
+
+.toolbar {
+  display: flex;
+  justify-content: space-between;
+  padding: 0.5rem 1rem;
+  border-bottom: 1px solid var(--line);
+  white-space: pre;
+}
+
+.grid {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.grid th,
+.grid td {
+  padding: 0.25rem 1rem;
+  text-align: right;
+  font-weight: 400;
+  color: var(--muted);
+  border-bottom: 1px solid var(--line);
+}
+
+.grid .left {
+  text-align: left;
+}
+
+.empty {
+  padding: 1rem;
+  margin: 0;
+}
+
+.action {
+  font-weight: 700;
+}
+
+.settings {
+  max-width: 60rem;
+  padding: 0.5rem 1rem 2rem;
+}
+
+.settings h2 {
+  font-size: 13px;
+  text-transform: uppercase;
+  margin: 1.5rem 0 0.5rem;
+}
+
+.settings .row {
+  display: flex;
+  justify-content: space-between;
+  gap: 2rem;
+  padding: 0.25rem 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.journal-line {
+  padding: 0.35rem 1rem;
+  border-top: 1px solid var(--line);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: pointer;
+}
+
+.journal-panel {
+  max-height: 40%;
+  display: flex;
+  flex-direction: column;
+  border-top: 1px solid var(--line);
+}
+
+.journal-list {
+  list-style: none;
+  margin: 0;
+  padding: 0.5rem 1rem;
+  overflow: auto;
+}
+
+.level-warning {
+  font-weight: 700;
+}
+
+.level-critical {
+  color: var(--alarm);
+  font-weight: 700;
+}

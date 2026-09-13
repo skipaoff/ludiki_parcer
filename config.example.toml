@@ -1,0 +1,39 @@
+# Terminal ludik — non-secret settings.
+# Copy to config.toml and edit. API keys and passwords never go here: they live in Windows Credential Manager.
+# Relative paths are resolved against the folder of this file.
+
+[server]
+host = "127.0.0.1"          # only loopback: the terminal must not be reachable from the network
+port = 8765
+open_browser = true
+dev_ui_port = 5173          # Vite dev server allowed as an origin during interface development
+
+[paths]
+data_dir = "../ludik-data"  # outside the repository: database cluster, spool, logs
+spool_dir = "../ludik-data/spool"
+logs_dir = "../ludik-data/logs"
+web_dist = "web/dist"
+
+[database]
+host = "127.0.0.1"
+port = 5432
+name = "ludik"
+user = "ludik"
+autostart = true            # start the local cluster with pg_ctl when it is not running
+pg_bin_dir = "../ludik-data/pgsql/bin"
+pg_data_dir = "../ludik-data/pgdata"
+connect_timeout_s = 5
+
+[storage]
+flush_interval_ms = 300
+max_batch_rows = 5000
+reconnect_interval_s = 5
+
+[ui]
+snapshot_hz = 5
+heartbeat_interval_s = 5
+heartbeat_timeout_s = 15
+journal_buffer = 500
+
+[logging]
+level = "INFO"

@@ -3,11 +3,31 @@ name = "terminal-ludik"
 version = "0.0.1"
 description = "Local trading terminal for cross-exchange perpetual price gaps"
 requires-python = ">=3.12"
-dependencies = []
+dependencies = [
+    "asyncpg>=0.30",
+    "fastapi>=0.115",
+    "keyring>=25",
+    "orjson>=3.10",
+    "pydantic>=2.9",
+    "uvicorn[standard]>=0.32",
+]
 
-[project.optional-dependencies]
-dev = ["pytest>=8"]
+[dependency-groups]
+dev = [
+    "httpx>=0.27",
+    "pytest>=8",
+    "pytest-asyncio>=0.24",
+]
+
+[tool.uv]
+# Antivirus TLS inspection (Avast on the dev machine) re-signs certificates with a root that only
+# the OS store trusts, so uv must use the platform certificate store instead of its bundled roots.
+system-certs = true
+package = false
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+markers = ["db: needs a live PostgreSQL with TimescaleDB in LUDIK_TEST_DSN"]
