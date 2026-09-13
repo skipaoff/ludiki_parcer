@@ -52,5 +52,22 @@ refresh_interval_s = 3600   # contracts, steps and pairs reload
 max_price_gap_pct = 20      # wider per-token price gap means a wrong multiplier or a different token
 max_index_gap_pct = 1       # wider index gap marks the pair suspicious until verified by hand
 
+[feed]
+size_usd = 100                  # size per leg; converted into the same token count on both exchanges
+min_roi_pct = 0.50              # net ROI by book, after round-trip taker fees, to enter the feed
+candidate_margin_pct = 0.50     # pairs this close to the threshold by best prices get order-book subscriptions
+book_limit = 60                 # pairs with live order books at once
+radar_rows = 20                 # best current spreads shown under the feed even below the threshold
+fresh_ms = 1000                 # a leg older than this greys the row out...
+quiet_book_max_ms = 10000       # ...unless its connection delivered frames within fresh_ms: exchanges push books only on change
+resubscribe_after_ms = 5000     # no book this long after subscribing, or older than quiet_book_max_ms: subscribe again
+tick_ms = 200
+enter_after_ms = 300            # ROI must hold this long before a gap enters the feed
+exit_hysteresis_pct = 0.10
+exit_after_ms = 2000
+default_taker_fee_binance_pct = 0.05   # used until an accepted key check reports the account rate
+default_taker_fee_mexc_pct = 0.05
+mexc_ticker_poll_ms = 1000      # MEXC best prices come from REST: the all-symbols websocket has no bid/ask
+
 [logging]
 level = "INFO"

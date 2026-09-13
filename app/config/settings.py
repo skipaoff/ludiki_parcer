@@ -93,6 +93,24 @@ class InstrumentsSettings(_Section):
     max_index_gap_pct: Decimal = Field(default=Decimal("1"), gt=0)
 
 
+class FeedSettings(_Section):
+    size_usd: Decimal = Field(default=Decimal("100"), gt=0)
+    min_roi_pct: Decimal = Decimal("0.50")
+    candidate_margin_pct: Decimal = Field(default=Decimal("0.50"), ge=0)
+    book_limit: int = Field(default=60, ge=2, le=200)
+    radar_rows: int = Field(default=20, ge=0, le=100)
+    fresh_ms: int = Field(default=1000, ge=100)
+    quiet_book_max_ms: int = Field(default=10000, ge=1000)
+    resubscribe_after_ms: int = Field(default=5000, ge=1000)
+    tick_ms: int = Field(default=200, ge=50)
+    enter_after_ms: int = Field(default=300, ge=0)
+    exit_hysteresis_pct: Decimal = Field(default=Decimal("0.10"), ge=0)
+    exit_after_ms: int = Field(default=2000, ge=0)
+    default_taker_fee_binance_pct: Decimal = Field(default=Decimal("0.05"), ge=0)
+    default_taker_fee_mexc_pct: Decimal = Field(default=Decimal("0.05"), ge=0)
+    mexc_ticker_poll_ms: int = Field(default=1000, ge=500)
+
+
 class LoggingSettings(_Section):
     level: str = "INFO"
 
@@ -105,6 +123,7 @@ class Settings(_Section):
     ui: UiSettings = UiSettings()
     exchanges: ExchangesSettings = ExchangesSettings()
     instruments: InstrumentsSettings = InstrumentsSettings()
+    feed: FeedSettings = FeedSettings()
     logging: LoggingSettings = LoggingSettings()
 
 

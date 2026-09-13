@@ -26,6 +26,7 @@ from app.api.hub import Hub
 from app.config.settings import ServerSettings
 from app.exchanges.service import ExchangeService, InvalidKeys, UnknownExchange
 from app.instruments.service import InstrumentService, UnknownPair
+from app.strategies.price_gap.settings import FeedSettingsService, InvalidSetting
 
 APP_NAME = "terminal-ludik"
 AUTH_TIMEOUT_S = 3
@@ -46,6 +47,7 @@ class ApiContext:
     journal: Callable[[int], Awaitable[list[dict[str, Any]]]]
     exchanges: ExchangeService | None = None
     instruments: InstrumentService | None = None
+    feed_settings: FeedSettingsService | None = None
 
 
 def allowed_origins(server: ServerSettings) -> frozenset[str]:
@@ -145,6 +147,27 @@ def create_app(server: ServerSettings, web_dist: Path, context: ApiContext) -> F
     @app.post("/api/instruments/refresh", dependencies=[Depends(require_token)])
     async def refresh_instruments() -> dict[str, Any]:
         return await instruments().refresh()
+
+    def feed_settings() -> FeedSettingsService:
+        if context.feed_settings is None:
+            raise HTTPException(status_code=503, detail="feed settings are not available")
+        return context.feed_settings
+
+    @app.get("/api/feed/settings", dependencies=[Depends(require_token)])
+    async def get_feed_settings() -> dict[str, str]:
+        return feed_settings().current()
+
+    @app.put("/api/feed/settings", dependencies=[Depends(require_token)])
+    async def put_feed_settings(request: Request) -> dict[str, str]:
+        try:
+            body = orjson.loads(await request.body())
+            if not isinstance(body, dict):
+                raise TypeError
+            return await feed_settings().update(body)
+        except (orjson.JSONDecodeError, TypeError):
+            raise HTTPException(status_code=400, detail="expected a JSON object") from None
+        except InvalidSetting as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from None
 
     @app.websocket("/ws")
     async def live(websocket: WebSocket) -> None:

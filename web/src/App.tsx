@@ -6,6 +6,7 @@
 
 import { useEffect, useState } from "react";
 import { exchangeTitle, ExchangesSettings, signedMs } from "./Exchanges";
+import { FeedScreen } from "./Feed";
 import { clock, describe, uptime } from "./format";
 import { PairsScreen } from "./Pairs";
 import { useLive, type LinkState } from "./live";
@@ -67,7 +68,7 @@ export function App({ token }: { token: string }) {
       <LinkBanner link={live.link} alarm={openPairs > 0} />
 
       <main className={live.link === "live" ? "body" : "body stale"}>
-        {tab === "gaps" && <GapsScreen snapshot={live.snapshot} />}
+        {tab === "gaps" && <FeedScreen token={token} snapshot={live.snapshot} />}
         {(tab === "funding" || tab === "unlocks") && <Placeholder text="Раздел появится после MVP." />}
         {tab === "trades" && <Placeholder text="История закрытых пар появится на этапе 6." />}
         {tab === "stats" && <Placeholder text="Статистика появится на этапе 7. Запись истории вилок — этап 4." />}
@@ -140,53 +141,20 @@ function LinkBanner({ link, alarm }: { link: LinkState; alarm: boolean }) {
   return <div className={alarm ? "banner alarm blink" : "banner blink"}>{text}</div>;
 }
 
-function GapsScreen({ snapshot }: { snapshot: Snapshot | null }) {
-  const pairs = snapshot?.pairs ?? { open: 0, limit: 0 };
-  return (
-    <div className="gaps">
-      <section className="feed">
-        <div className="toolbar muted">ROI ≥ —  ≤ —   Объём 24ч ≥ —   Размер —   сорт: ROI ↓</div>
-        <table className="grid">
-          <thead>
-            <tr>
-              <th className="left">МОНЕТА</th>
-              <th className="left">ЛОНГ</th>
-              <th className="left">ШОРТ</th>
-              <th>ROI</th>
-              <th>ЁМК.</th>
-              <th>ЖИВЁТ</th>
-              <th />
-            </tr>
-          </thead>
-        </table>
-        <p className="empty muted">Лента вилок появится на этапе 3, после подключения Binance и MEXC.</p>
-      </section>
-      <aside className="pairs">
-        <div className="toolbar">
-          <span>
-            ОТКРЫТЫЕ ПАРЫ {pairs.open}/{pairs.limit}
-          </span>
-          <button className="action" disabled title="Торговля появится на этапе 6">
-            [ЗАКРЫТЬ ВСЁ]
-          </button>
-        </div>
-        <p className="empty muted">Открытых пар нет.</p>
-      </aside>
-    </div>
-  );
-}
-
 function SettingsScreen({ token, snapshot, now }: { token: string; snapshot: Snapshot | null; now: number }) {
   return (
     <div className="settings">
       <ExchangesSettings token={token} live={snapshot?.exchanges} />
       <section>
         <h2>Торговля</h2>
-        <p className="muted">Размер, плечо, пороги и риск-лимиты — этапы 3 и 6.</p>
+        <p className="muted">
+          Размер на ногу и порог ленты сейчас задаются в config.toml, раздел [feed]. Редактирование здесь с историей изменений,
+          плечо и риск-лимиты — этап 6.
+        </p>
       </section>
       <section>
         <h2>Фильтры</h2>
-        <p className="muted">Фильтры ленты — этап 3.</p>
+        <p className="muted">Фильтры ленты — прямо над лентой на экране «Гэпы», запоминаются в этом браузере.</p>
       </section>
       <section>
         <h2>Уведомления</h2>

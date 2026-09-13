@@ -26,7 +26,7 @@ export function compact(value: string | null): string {
   if (abs >= 1e9) return `${(number / 1e9).toFixed(abs >= 1e10 ? 0 : 1)}B`;
   if (abs >= 1e6) return `${(number / 1e6).toFixed(abs >= 1e7 ? 0 : 1)}M`;
   if (abs >= 1e3) return `${(number / 1e3).toFixed(abs >= 1e4 ? 0 : 1)}K`;
-  return String(number);
+  return abs >= 10 || number === 0 ? String(Math.round(number)) : String(Number(number.toPrecision(3)));
 }
 
 function pct(value: string | null, digits = 2): string {

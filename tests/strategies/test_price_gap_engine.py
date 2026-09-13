@@ -1,0 +1,183 @@
+from decimal import Decimal
+
+from app.config.settings import FeedSettings
+from app.core.pairs import Quote, assess_pair
+from app.instruments.service import PairRecord
+from app.market.state import MarketState
+from app.strategies.price_gap.engine import PriceGapEngine
+from tests.core.helpers import instrument
+
+
+class Clock:
+    def __init__(self):
+        self.now = 1_000_000.0
+
+    def __call__(self):
+        return self.now
+
+
+class FakeFeed:
+    def __init__(self, clock):
+        self.depth: list[str] = []
+        self.resubscribed: list[str] = []
+        self.clock = clock
+        self.alive = True
+
+    def set_depth(self, symbols):
+        self.depth = list(symbols)
+
+    def resubscribe_depth(self, symbol):
+        self.resubscribed.append(symbol)
+
+    def stream_age_ms(self, symbol):
+        return 10.0 if self.alive else None
+
+
+class Catalog:
+    def __init__(self, records):
+        self._records = records
+
+    def records(self):
+        return self._records
+
+
+def sol_record(**flags) -> PairRecord:
+    binance = instrument("binance", "SOLUSDT", "SOL", qty_step_units="0.01", min_qty_units="0.01")
+    mexc = instrument("mexc", "SOL_USDT", "SOL", qty_unit_tokens="0.1", min_notional_usd="0")
+    assessment = assess_pair(binance, mexc, Quote(mark=Decimal("100"), index=Decimal("100")), Quote(mark=Decimal("100"), index=Decimal("100")))
+    return PairRecord(key="binance:SOLUSDT|mexc:SOL_USDT", assessment=assessment, **flags)
+
+
+def build(record: PairRecord, **settings):
+    clock = Clock()
+    state = MarketState(clock)
+    binance, mexc = FakeFeed(clock), FakeFeed(clock)
+    radar_symbols = []
+    engine = PriceGapEngine(
+        Catalog([record]),
+        state,
+        binance,
+        mexc,
+        FeedSettings(size_usd=Decimal("1000"), min_roi_pct=Decimal("0.5"), enter_after_ms=300, **settings),
+        lambda exchange: Decimal("0.05"),
+        radar_symbols.extend,
+        clock,
+    )
+    return engine, state, clock, binance, mexc, radar_symbols
+
+
+def push_market(state, mexc_ask="100.00", binance_bid="101.20"):
+    # MEXC is cheap, Binance is rich: long MEXC, short Binance.
+    state.set_top("mexc", "SOL_USDT", float(Decimal(mexc_ask) - Decimal("0.01")), float(mexc_ask), 1)
+    state.set_top("binance", "SOLUSDT", float(binance_bid), float(Decimal(binance_bid) + Decimal("0.01")), 1)
+    # MEXC quantities are contracts of 0.1 SOL; Binance quantities are SOL.
+    state.set_book("mexc", "SOL_USDT", [[float(mexc_ask) - 0.01, 1000, 1]], [[float(mexc_ask), 1000, 1], [float(mexc_ask) + 0.5, 1000, 1]], 1)
+    state.set_book("binance", "SOLUSDT", [[binance_bid, "100"], ["100.00", "100"]], [[str(Decimal(binance_bid) + Decimal("0.01")), "100"]], 1)
+
+
+def test_gap_enters_the_feed_after_holding_above_threshold():
+    engine, state, clock, binance, mexc, radar_symbols = build(sol_record())
+    engine.tick()  # catalog sync
+    assert radar_symbols == ["SOLUSDT"]
+
+    push_market(state)
+    engine.tick()  # radar sees the gap, books get chosen
+    assert binance.depth == ["SOLUSDT"] and mexc.depth == ["SOL_USDT"]
+    assert engine.view()["rows"] == []
+
+    clock.now += 400
+    push_market(state)
+    engine.tick()
+
+    rows = engine.view()["rows"]
+    assert len(rows) == 1
+    row = rows[0]
+    assert (row["long"]["exchange"], row["short"]["exchange"]) == ("mexc", "binance")
+    assert row["qty_tokens"] == "10"  # $1000 / $100, on the common 0.1 SOL step
+    assert Decimal(row["roi_net_pct"]) == Decimal("1.2") - Decimal("0.2")
+    assert Decimal(row["capacity_usd"]) > 0
+    assert row["block"] is None
+    assert row["lifetime_ms"] == 0
+
+
+def test_stale_leg_blocks_the_row_and_does_not_extend_the_gap():
+    engine, state, clock, binance, mexc, _ = build(sol_record())
+    engine.tick()
+    push_market(state)
+    engine.tick()
+    clock.now += 400
+    push_market(state)
+    engine.tick()
+    assert len(engine.view()["rows"]) == 1
+
+    binance.alive = mexc.alive = False
+    clock.now += 1_500  # books no longer change and the connections went silent
+    engine.tick()
+    row = engine.view()["rows"][0]
+    assert row["block"] == "stale"
+
+    clock.now += 2_100  # below the threshold for longer than exit_after_ms
+    engine.tick()
+    assert engine.view()["rows"] == []
+
+
+def test_suspicious_pair_is_shown_but_blocked():
+    record = sol_record()
+    record.assessment = assess_pair(
+        record.assessment.a, record.assessment.b, Quote(mark=Decimal("100"), index=Decimal("100")), Quote(mark=Decimal("100"), index=Decimal("104"))
+    )
+    engine, state, clock, *_ = build(record)
+    engine.tick()
+    push_market(state)
+    engine.tick()
+    clock.now += 400
+    push_market(state)
+    engine.tick()
+
+    row = engine.view()["rows"][0]
+    assert row["suspicious"] is True
+    assert row["block"] == "suspicious"
+
+
+def test_flipped_direction_never_shows_the_pair_twice():
+    engine, state, clock, *_ = build(sol_record())
+    engine.tick()
+    push_market(state)  # long MEXC, short Binance
+    engine.tick()
+    clock.now += 400
+    push_market(state)
+    engine.tick()
+    assert engine.view()["rows"][0]["long"]["exchange"] == "mexc"
+
+    def flipped():
+        # Binance is now the cheap side by more than the threshold.
+        state.set_top("binance", "SOLUSDT", 98.79, 98.80, 2)
+        state.set_top("mexc", "SOL_USDT", 100.0, 100.01, 2)
+        state.set_book("binance", "SOLUSDT", [["98.79", "100"]], [["98.80", "100"]], 2)
+        state.set_book("mexc", "SOL_USDT", [[100.0, 1000, 1]], [[100.01, 1000, 1]], 2)
+
+    flipped()
+    clock.now += 200
+    engine.tick()
+    flipped()
+    clock.now += 400
+    engine.tick()  # new direction entered; old one is still inside its exit hysteresis
+
+    rows = engine.view()["rows"]
+    assert len(rows) == 1
+    assert rows[0]["long"]["exchange"] == "binance"
+
+
+def test_no_gap_stays_on_the_radar_only():
+    engine, state, clock, *_ = build(sol_record())
+    engine.tick()
+    push_market(state, mexc_ask="100.00", binance_bid="100.02")
+    engine.tick()
+    clock.now += 400
+    push_market(state, mexc_ask="100.00", binance_bid="100.02")
+    engine.tick()
+
+    view = engine.view()
+    assert view["rows"] == []
+    assert len(view["radar"]) == 1
+    assert Decimal(view["radar"][0]["roi_net_pct"]) < 0

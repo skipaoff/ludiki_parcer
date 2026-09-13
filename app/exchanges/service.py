@@ -128,6 +128,14 @@ class ExchangeService:
             raise UnknownExchange(name)
         return exchange
 
+    def account_taker_fee_pct(self, name: str) -> Decimal | None:
+        """Taker fee from the last accepted account check, None until there is one."""
+        exchange = self._exchanges.get(name)
+        if exchange is None or exchange.check is None or not exchange.check["accepted"]:
+            return None
+        value = exchange.check["facts"].get("taker_fee_pct")
+        return None if value is None else Decimal(value)
+
     def adapter(self, name: str) -> ExchangeAdapter:
         """The current client of an exchange; it changes when keys are replaced, so do not keep it."""
         return self._get(name).adapter

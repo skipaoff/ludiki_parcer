@@ -255,6 +255,56 @@ a:hover {
   cursor: pointer;
 }
 
+.feed-filters {
+  flex-wrap: wrap;
+  row-gap: 0.5rem;
+  white-space: nowrap;
+}
+
+.feed-filters label input {
+  width: 5.5rem;
+}
+
+.feed-filters .check-label input {
+  width: auto;
+  accent-color: var(--fg);
+}
+
+.feed-table td {
+  color: var(--fg);
+  white-space: nowrap;
+}
+
+.feed-table tr.muted td {
+  color: var(--muted);
+}
+
+.settings-form input {
+  width: 4.5rem;
+  margin: 0 0.25rem;
+}
+
+@media (max-width: 900px) {
+  .gaps {
+    grid-template-columns: 1fr;
+    grid-auto-rows: max-content;
+  }
+
+  .feed {
+    border-right: 0;
+  }
+}
+
+.section-title {
+  margin-top: 1rem;
+  border-top: 1px solid var(--line);
+}
+
+.stats-line {
+  white-space: normal;
+  font-size: 12px;
+}
+
 .exchange-card {
   margin-bottom: 1.5rem;
 }

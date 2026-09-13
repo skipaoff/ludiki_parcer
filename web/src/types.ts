@@ -105,9 +105,48 @@ export interface PairView {
   tradable: boolean;
 }
 
+export interface FeedLeg {
+  exchange: string;
+  symbol: string;
+  url: string | null;
+}
+
+export interface FeedRow {
+  key: string;
+  token: string;
+  long: FeedLeg | null;
+  short: FeedLeg | null;
+  long_avg: string | null;
+  short_avg: string | null;
+  qty_tokens: string | null;
+  roi_net_pct: string | null;
+  roi_gross_pct: string | null;
+  roi_top_pct: number | null;
+  exit_spread_pct: string | null;
+  capacity_usd: string | null;
+  age_long_ms: number | null;
+  age_short_ms: number | null;
+  phase: "candidate" | "in_feed" | "tracking" | null;
+  lifetime_ms: number | null;
+  roi_peak_pct: string | null;
+  volume24h_weak_usd: string | null;
+  suspicious: boolean;
+  blacklisted: boolean;
+  block: string | null;
+}
+
+export interface FeedView {
+  rows: FeedRow[];
+  radar: FeedRow[];
+  settings?: { size_usd: string; min_roi_pct: string; fresh_ms: number; taker_fee_pct: Record<string, string> };
+  stats: Record<string, number>;
+  streams?: Record<string, Record<string, number>>;
+}
+
 export interface Snapshot {
   app: { version: string; started_ts_ms: number };
   instruments?: InstrumentsSummary;
+  feed?: FeedView;
   database: {
     status: "ok" | "down";
     error: string | null;

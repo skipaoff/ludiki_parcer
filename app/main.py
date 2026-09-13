@@ -19,6 +19,7 @@ import socket
 import time
 import urllib.request
 import webbrowser
+from decimal import Decimal
 from pathlib import Path
 from typing import Any
 
@@ -30,6 +31,11 @@ from app.api.server import APP_NAME, ApiContext, create_app
 from app.config.settings import REPO_ROOT, Settings, load_settings
 from app.exchanges.service import ExchangeService
 from app.instruments.service import InstrumentService
+from app.market.binance_streams import BinanceStreams
+from app.market.mexc_market import MexcMarket
+from app.market.state import MarketState
+from app.strategies.price_gap.engine import PriceGapEngine
+from app.strategies.price_gap.settings import FeedSettingsService
 from app.journal.journal import Journal, Level
 from app.keystore.keystore import DB_PASSWORD, SESSION_TOKEN, Keystore
 from app.storage.database import Database
@@ -91,6 +97,28 @@ async def _serve(
     journal.add_sink(lambda event: writer.submit("events", event.to_row()))
     exchanges = ExchangeService(settings.exchanges, keystore, journal, writer.submit, redactor)
     instruments = InstrumentService(exchanges.adapter, database, journal, settings.instruments)
+    market = MarketState()
+    binance_streams = BinanceStreams(market)
+    mexc_market = MexcMarket(market, settings.feed.mexc_ticker_poll_ms)
+    default_fees = {
+        "binance": settings.feed.default_taker_fee_binance_pct,
+        "mexc": settings.feed.default_taker_fee_mexc_pct,
+    }
+
+    def taker_fee_pct(exchange: str) -> Decimal:
+        account = exchanges.account_taker_fee_pct(exchange)
+        return account if account is not None else default_fees[exchange]
+
+    engine = PriceGapEngine(
+        instruments,
+        market,
+        binance_streams,
+        mexc_market,
+        settings.feed,
+        taker_fee_pct,
+        binance_streams.set_radar,
+    )
+    feed_settings = FeedSettingsService(engine, database, journal)
 
     def snapshot() -> dict[str, Any]:
         return {
@@ -104,6 +132,7 @@ async def _serve(
             },
             "exchanges": exchanges.snapshot(),
             "instruments": instruments.summary(),
+            "feed": {**engine.view(), "streams": {"binance": binance_streams.stats(), "mexc": mexc_market.stats()}},
             "pairs": {"open": 0, "limit": 3},
         }
 
@@ -129,6 +158,7 @@ async def _serve(
         journal=journal_events,
         exchanges=exchanges,
         instruments=instruments,
+        feed_settings=feed_settings,
     )
     app = create_app(settings.server, settings.paths.web_dist, context)
     server = _Server(
@@ -145,12 +175,16 @@ async def _serve(
 
     journal.emit(Level.INFO, "app", "started", version=VERSION, pid=os.getpid())
     await writer.flush(force_connect=True)
+    await feed_settings.load()
     background = [
         asyncio.create_task(writer.run()),
         asyncio.create_task(hub.run()),
         asyncio.create_task(exchanges.run_monitor()),
         asyncio.create_task(exchanges.check_all_with_keys()),
         asyncio.create_task(instruments.run()),
+        asyncio.create_task(binance_streams.run()),
+        asyncio.create_task(mexc_market.run()),
+        asyncio.create_task(engine.run()),
     ]
     server_task = asyncio.create_task(server.serve())
     try:

@@ -51,6 +51,8 @@ export function describe(event: JournalEvent): string {
       const warnings = Array.isArray(payload.warnings) ? payload.warnings : [];
       return `${exchangeName(event)} ключ принят${warnings.length ? ` · замечания: ${warnings.join(", ")}` : ""}`;
     }
+    case "settings.changed":
+      return `настройка ${String(payload.key)}: ${String(payload.old)} → ${String(payload.new)}`;
     case "instruments.refreshed":
       return `пары обновлены · Binance ${String(payload.binance)} · MEXC ${String(payload.mexc)} · общих ${String(payload.pairs)} · подозрительных ${String(payload.suspicious)}`;
     case "instruments.refresh_failed":
