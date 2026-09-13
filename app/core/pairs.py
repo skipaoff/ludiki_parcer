@@ -50,6 +50,8 @@ class PairAssessment:
     index_gap_pct: Decimal | None
     volume24h_weak_usd: Decimal | None
     suspicious_reason: str | None
+    volume24h_a_usd: Decimal | None = None
+    volume24h_b_usd: Decimal | None = None
 
 
 def per_token(price: Decimal | None, instrument: Instrument) -> Decimal | None:
@@ -104,4 +106,6 @@ def assess_pair(
         index_gap_pct=index_gap,
         volume24h_weak_usd=weak_volume,
         suspicious_reason=reason,
+        volume24h_a_usd=quote_a.volume24h_usd if quote_a else None,
+        volume24h_b_usd=quote_b.volume24h_usd if quote_b else None,
     )

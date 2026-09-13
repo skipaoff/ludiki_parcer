@@ -29,6 +29,16 @@ class Top:
     received_ms: float
 
 
+@dataclass(slots=True)
+class Mark:
+    """Mark and index price per token, and the 24h turnover when the source provides it."""
+
+    mark: float | None
+    index: float | None
+    volume24h_usd: float | None
+    received_ms: float
+
+
 def per_token_levels(raw: Sequence[Sequence[str | float]], instrument: Instrument, descending: bool) -> tuple[Level, ...]:
     """Raw [price, quantity in exchange units, ...] levels into per-token Levels, best first, zero quantities dropped."""
     price_unit = instrument.price_unit_tokens
@@ -48,6 +58,7 @@ class MarketState:
         self._instruments: dict[Key, Instrument] = {}
         self.tops: dict[Key, Top] = {}
         self.books: dict[Key, Book] = {}
+        self.marks: dict[Key, Mark] = {}
         self.messages: dict[str, int] = {}
 
     def set_instruments(self, instruments: Sequence[Instrument]) -> None:
@@ -65,6 +76,21 @@ class MarketState:
             return
         unit = float(instrument.price_unit_tokens)
         self.tops[(exchange, symbol)] = Top(bid / unit, ask / unit, exchange_ts_ms, self._clock_ms())
+
+    def set_mark(
+        self, exchange: str, symbol: str, mark: float | None, index: float | None, volume24h_usd: float | None = None
+    ) -> None:
+        instrument = self._instruments.get((exchange, symbol))
+        if instrument is None:
+            return
+        unit = float(instrument.price_unit_tokens)
+        previous = self.marks.get((exchange, symbol))
+        self.marks[(exchange, symbol)] = Mark(
+            mark=mark / unit if mark else None,
+            index=index / unit if index else None,
+            volume24h_usd=volume24h_usd if volume24h_usd is not None else (previous.volume24h_usd if previous else None),
+            received_ms=self._clock_ms(),
+        )
 
     def set_book(
         self,

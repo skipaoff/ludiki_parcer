@@ -40,6 +40,8 @@ class PairRecord:
     pair_id: int | None = None
     manually_verified: bool = False
     blacklisted: bool = False
+    instrument_a_id: int | None = None
+    instrument_b_id: int | None = None
 
     @property
     def suspicious(self) -> bool:
@@ -149,6 +151,8 @@ class InstrumentService:
                 pair_id=flags.pair_id if flags else (old.pair_id if old else None),
                 manually_verified=flags.manually_verified if flags else (old.manually_verified if old else False),
                 blacklisted=flags.blacklisted if flags else (old.blacklisted if old else False),
+                instrument_a_id=flags.instrument_a_id if flags else (old.instrument_a_id if old else None),
+                instrument_b_id=flags.instrument_b_id if flags else (old.instrument_b_id if old else None),
             )
 
         self._pairs = pairs

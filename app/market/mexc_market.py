@@ -51,14 +51,27 @@ def handle_frame(state: MarketState, raw: str | bytes) -> None:
 
 def ticker_tops(payload: dict[str, Any]) -> list[tuple[str, float, float, int]]:
     """GET /api/v1/contract/ticker — (symbol, bid1, ask1, timestamp) of contracts with both prices."""
+    return [(symbol, bid, ask, ts) for symbol, bid, ask, ts, *_ in ticker_rows(payload) if bid and ask]
+
+
+def ticker_rows(payload: dict[str, Any]) -> list[tuple[str, float, float, int, float | None, float | None, float | None]]:
+    """(symbol, bid1, ask1, timestamp, fairPrice, indexPrice, amount24) for every contract in the ticker answer."""
     if not payload.get("success", False):
         raise RuntimeError(f"mexc ticker answer code {payload.get('code')}")
-    tops = []
+    rows = []
     for item in payload.get("data") or []:
-        bid, ask = item.get("bid1"), item.get("ask1")
-        if bid and ask:
-            tops.append((item["symbol"], float(bid), float(ask), int(item.get("timestamp") or 0)))
-    return tops
+        rows.append(
+            (
+                item["symbol"],
+                float(item.get("bid1") or 0),
+                float(item.get("ask1") or 0),
+                int(item.get("timestamp") or 0),
+                float(item["fairPrice"]) if item.get("fairPrice") else None,
+                float(item["indexPrice"]) if item.get("indexPrice") else None,
+                float(item["amount24"]) if item.get("amount24") is not None else None,
+            )
+        )
+    return rows
 
 
 class MexcMarket:
@@ -137,9 +150,10 @@ class MexcMarket:
                 try:
                     async with session.get(TICKER_URL) as response:
                         payload = orjson.loads(await response.read())
-                    tops = ticker_tops(payload)
-                    for symbol, bid, ask, ts in tops:
-                        self._state.set_top(EXCHANGE, symbol, bid, ask, ts)
+                    for symbol, bid, ask, ts, fair, index, amount in ticker_rows(payload):
+                        if bid and ask:
+                            self._state.set_top(EXCHANGE, symbol, bid, ask, ts)
+                        self._state.set_mark(EXCHANGE, symbol, fair, index, amount)
                     self._state.count(EXCHANGE)
                     self.polls += 1
                     self.last_poll_ms = time.time() * 1000

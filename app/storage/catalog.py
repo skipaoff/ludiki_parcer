@@ -57,6 +57,8 @@ class StoredPair:
     pair_id: int
     manually_verified: bool
     blacklisted: bool
+    instrument_a_id: int | None = None
+    instrument_b_id: int | None = None
 
 
 def pair_key(assessment: PairAssessment) -> str:
@@ -103,12 +105,14 @@ async def save_catalog(
             raise CatalogWriteError(f"{len(missing)} instruments did not reach the database, e.g. {missing[:3]}")
 
         ordered: dict[str, tuple[int, int]] = {}
+        legs: dict[str, tuple[int, int]] = {}
         values = []
         for assessment in assessments:
             a_id = ids[(assessment.a.exchange, assessment.a.symbol_raw)]
             b_id = ids[(assessment.b.exchange, assessment.b.symbol_raw)]
             low, high = sorted((a_id, b_id))
             ordered[pair_key(assessment)] = (low, high)
+            legs[pair_key(assessment)] = (a_id, b_id)
             values.append(
                 {
                     "token": assessment.token,
@@ -124,7 +128,13 @@ async def save_catalog(
         stored = await connection.fetch("SELECT id, instrument_a_id, instrument_b_id, manually_verified, blacklisted FROM pairs")
         by_ids = {(row["instrument_a_id"], row["instrument_b_id"]): row for row in stored}
         return {
-            key: StoredPair(by_ids[ids_pair]["id"], by_ids[ids_pair]["manually_verified"], by_ids[ids_pair]["blacklisted"])
+            key: StoredPair(
+                by_ids[ids_pair]["id"],
+                by_ids[ids_pair]["manually_verified"],
+                by_ids[ids_pair]["blacklisted"],
+                legs[key][0],
+                legs[key][1],
+            )
             for key, ids_pair in ordered.items()
         }
 

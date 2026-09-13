@@ -14,7 +14,7 @@ import contextlib
 import secrets
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Awaitable, Callable
+from typing import Any, Awaitable, Callable, Protocol
 
 import orjson
 from fastapi import Depends, FastAPI, HTTPException, Query, Request, WebSocket
@@ -38,6 +38,14 @@ NOT_BUILT_PAGE = """<!doctype html><meta charset="utf-8"><title>Terminal Ludik</
 или запустите терминал через <code>ludik.cmd</code>.</body>"""
 
 
+class HistoryQueries(Protocol):
+    async def summary(self, hours: int) -> dict[str, Any]: ...
+
+    async def episodes(self, limit: int) -> list[dict[str, Any]]: ...
+
+    async def storage(self) -> dict[str, Any]: ...
+
+
 @dataclass(frozen=True, slots=True)
 class ApiContext:
     token: str
@@ -48,6 +56,7 @@ class ApiContext:
     exchanges: ExchangeService | None = None
     instruments: InstrumentService | None = None
     feed_settings: FeedSettingsService | None = None
+    history: HistoryQueries | None = None
 
 
 def allowed_origins(server: ServerSettings) -> frozenset[str]:
@@ -152,6 +161,29 @@ def create_app(server: ServerSettings, web_dist: Path, context: ApiContext) -> F
         if context.feed_settings is None:
             raise HTTPException(status_code=503, detail="feed settings are not available")
         return context.feed_settings
+
+    def history() -> HistoryQueries:
+        if context.history is None:
+            raise HTTPException(status_code=503, detail="history is not available")
+        return context.history
+
+    async def database_call(call: Awaitable[Any]) -> Any:
+        try:
+            return await call
+        except ConnectionError:
+            raise HTTPException(status_code=503, detail="database is not connected") from None
+
+    @app.get("/api/history/summary", dependencies=[Depends(require_token)])
+    async def history_summary(hours: int = Query(default=24, ge=1, le=24 * 90)) -> dict[str, Any]:
+        return await database_call(history().summary(hours))
+
+    @app.get("/api/history/episodes", dependencies=[Depends(require_token)])
+    async def history_episodes(limit: int = Query(default=100, ge=1, le=1000)) -> dict[str, Any]:
+        return {"episodes": await database_call(history().episodes(limit))}
+
+    @app.get("/api/history/storage", dependencies=[Depends(require_token)])
+    async def history_storage() -> dict[str, Any]:
+        return await database_call(history().storage())
 
     @app.get("/api/feed/settings", dependencies=[Depends(require_token)])
     async def get_feed_settings() -> dict[str, str]:

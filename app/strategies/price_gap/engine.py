@@ -18,7 +18,7 @@ from decimal import Decimal
 from typing import Any, Callable, Protocol
 
 from app.config.settings import FeedSettings
-from app.core.episodes import EpisodeRules, EpisodeState, Phase, Sample, end, step
+from app.core.episodes import EpisodeRules, EpisodeState, EventKind, Phase, Sample, end, step
 from app.core.links import trade_url
 from app.core.qty import QtyRejected, plan_quantity
 from app.core.radar import TopRoi, best_price_roi, choose_books, leg_fresh
@@ -26,6 +26,7 @@ from app.core.roi import best_entry, capacity_tokens, exit_quote
 from app.core.schemas import Fees, Instrument
 from app.instruments.service import PairRecord
 from app.market.state import MarketState
+from app.strategies.price_gap.recorder import EpisodeSink, NullSink
 
 log = logging.getLogger(__name__)
 
@@ -57,6 +58,8 @@ class _Quote:
     short: Instrument | None = None
     long_avg: Decimal | None = None
     short_avg: Decimal | None = None
+    long_exit_avg: Decimal | None = None
+    short_exit_avg: Decimal | None = None
     qty_tokens: Decimal | None = None
     roi_gross_pct: Decimal | None = None
     roi_net_pct: Decimal | None = None
@@ -92,7 +95,9 @@ class PriceGapEngine:
         taker_fee_pct: Callable[[str], Decimal],
         on_radar_symbols: Callable[[list[str]], None],
         clock_ms: Callable[[], float] = lambda: time.time() * 1000,
+        sink: EpisodeSink | None = None,
     ) -> None:
+        self._sink: EpisodeSink = sink or NullSink()
         self._catalog = catalog
         self._state = state
         self._feeds = {"binance": binance, "mexc": mexc}
@@ -187,13 +192,13 @@ class PriceGapEngine:
         return tops
 
     def _choose(self, now: float) -> None:
-        watched = [
-            self._episode_pair[episode_key]
-            for episode_key, episode in sorted(
-                self._episodes.items(), key=lambda item: item[1].roi_peak or Decimal(0), reverse=True
-            )
-            if episode.phase in (Phase.IN_FEED, Phase.TRACKING)
+        by_peak = sorted(self._episodes.items(), key=lambda item: item[1].roi_peak or Decimal(0), reverse=True)
+        in_feed = [self._episode_pair[key] for key, episode in by_peak if episode.phase is Phase.IN_FEED]
+        # Gaps that left the feed are followed until convergence, but never crowd out candidates entirely.
+        tracking = [self._episode_pair[key] for key, episode in by_peak if episode.phase is Phase.TRACKING][
+            : self._settings.tracking_limit
         ]
+        watched = in_feed + tracking
         threshold = float(self._settings.min_roi_pct - self._settings.candidate_margin_pct)
         candidates = [top.key for top in self._tops if top.roi_net_pct >= threshold]
         radar = [top.key for top in self._tops[: self._settings.radar_rows]]
@@ -267,6 +272,8 @@ class PriceGapEngine:
                     quote.qty_tokens = plan.qty_tokens
                     quote.roi_gross_pct, quote.roi_net_pct = entry.roi_gross_pct, entry.roi_net_pct
                     quote.exit_spread_pct = exit.exit_spread_pct if exit else None
+                    quote.long_exit_avg = exit.long_exit_avg if exit else None
+                    quote.short_exit_avg = exit.short_exit_avg if exit else None
                     quote.age_long_ms = age_a if long is a else age_b
                     quote.age_short_ms = age_b if long is a else age_a
                     if not (fresh[key_a] and fresh[key_b]):
@@ -291,27 +298,48 @@ class PriceGapEngine:
         for episode_key in [k for k, pair in self._episode_pair.items() if pair == record.key]:
             if direction is None or not episode_key.endswith(f">{direction}"):
                 # The other direction (or no measurement) sees no gap in this sample.
-                self._advance(episode_key, record.key, Sample(int(now), None, None))
+                self._advance(episode_key, record, Sample(int(now), None, None), None)
         if direction is not None:
-            self._advance(f"{record.key}>{direction}", record.key, Sample(int(now), sample_roi, exit_spread))
+            self._advance(f"{record.key}>{direction}", record, Sample(int(now), sample_roi, exit_spread), quote)
 
-    def _advance(self, episode_key: str, pair_key: str, sample: Sample) -> None:
+    def _advance(self, episode_key: str, record: PairRecord, sample: Sample, quote: _Quote | None) -> None:
         state, events = step(self._episodes.get(episode_key), sample, self._rules)
+        for event in events:
+            if event.kind is EventKind.ENTERED_FEED:
+                if state.first_entered_feed_ms == event.ts_ms:
+                    self._gaps_entered += 1
+                self._sink.entered(episode_key, record, state, event.ts_ms)
+            elif event.kind is EventKind.LEFT_FEED:
+                self._sink.left_feed(episode_key, event.ts_ms)
+            elif event.kind is EventKind.ENDED:
+                self._sink.ended(episode_key, record, state, event.ts_ms)
         if state is None or state.phase is Phase.ENDED:
             self._episodes.pop(episode_key, None)
             self._episode_pair.pop(episode_key, None)
             return
-        if any(event.kind.value == "entered_feed" for event in events) and state.first_entered_feed_ms == sample.ts_ms:
-            self._gaps_entered += 1
         self._episodes[episode_key] = state
-        self._episode_pair[episode_key] = pair_key
+        self._episode_pair[episode_key] = record.key
+        if state.phase in (Phase.IN_FEED, Phase.TRACKING):
+            self._sink.sampled(episode_key, record, state, quote, sample.ts_ms)
 
     def _end_unwatched(self, now: float) -> None:
         for episode_key, pair_key in list(self._episode_pair.items()):
             if pair_key not in self._books:
-                end(self._episodes[episode_key], int(now), "evicted")
-                self._episodes.pop(episode_key, None)
-                self._episode_pair.pop(episode_key, None)
+                self._finish(episode_key, int(now), "evicted")
+
+    def _finish(self, episode_key: str, now_ms: int, reason: str) -> None:
+        state = self._episodes.pop(episode_key)
+        pair_key = self._episode_pair.pop(episode_key)
+        ended, _ = end(state, now_ms, reason)
+        record = self._records.get(pair_key)
+        if record is not None:
+            self._sink.ended(episode_key, record, ended, now_ms)
+
+    def close(self) -> None:
+        """End every tracked gap with app_stop so its history row is complete; call before the write queue closes."""
+        now = int(self._clock_ms())
+        for episode_key in list(self._episodes):
+            self._finish(episode_key, now, "app_stop")
 
     # ── view ─────────────────────────────────────────────────────────────────
 

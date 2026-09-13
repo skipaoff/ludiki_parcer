@@ -24,6 +24,8 @@ from app.market.ws import ManagedSocket
 log = logging.getLogger(__name__)
 
 PUBLIC_URL = "wss://fstream.binance.com/public/stream"
+MARKET_URL = "wss://fstream.binance.com/market/stream"
+MARK_PRICE_STREAM = "!markPrice@arr@1s"
 BOOK_TICKER_URL = "https://fapi.binance.com/fapi/v1/ticker/bookTicker"
 SEED_INTERVAL_S = 30
 STREAMS_PER_CONNECTION = 200
@@ -50,6 +52,12 @@ def handle_frame(state: MarketState, raw: str | bytes) -> None:
         if message.get("error"):
             log.warning("binance stream error: %s", message["error"])
         return
+    if isinstance(data, list):
+        # !markPrice@arr@1s: every symbol once a second.
+        for item in data:
+            if item.get("e") == "markPriceUpdate":
+                state.set_mark(EXCHANGE, item["s"], float(item["p"]), float(item["i"]) if item.get("i") else None)
+        return
     state.count(EXCHANGE)
     kind = data.get("e")
     if kind == "bookTicker":
@@ -63,13 +71,15 @@ class BinanceStreams:
         self._state = state
         self._radar: list[ManagedSocket] = []
         self._depth = self._socket("binance-depth")
+        self._marks = self._socket("binance-marks", MARKET_URL)
+        self._marks.set_desired([MARK_PRICE_STREAM])
         self._tasks: dict[ManagedSocket, asyncio.Task] = {}
         self._radar_symbols: list[str] = []
 
-    def _socket(self, name: str) -> ManagedSocket:
+    def _socket(self, name: str, url: str = "") -> ManagedSocket:
         return ManagedSocket(
             name,
-            PUBLIC_URL,
+            url or PUBLIC_URL,
             lambda raw: handle_frame(self._state, raw),
             control_messages,
             batch_size=PARAMS_PER_MESSAGE,
@@ -104,6 +114,7 @@ class BinanceStreams:
 
     async def run(self) -> None:
         self._start(self._depth)
+        self._start(self._marks)
         for socket in self._radar:
             self._start(socket)
         try:
@@ -140,7 +151,7 @@ class BinanceStreams:
             pass  # not running yet; run() starts it
 
     def stats(self) -> dict[str, Any]:
-        sockets = [self._depth, *self._radar]
+        sockets = [self._depth, self._marks, *self._radar]
         return {
             "connections": sum(1 for socket in sockets if socket.connected),
             "sockets": len(sockets),

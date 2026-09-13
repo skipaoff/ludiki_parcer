@@ -147,6 +147,7 @@ export interface Snapshot {
   app: { version: string; started_ts_ms: number };
   instruments?: InstrumentsSummary;
   feed?: FeedView;
+  history?: { recorded: number; open: number; radar_snapshots: number };
   database: {
     status: "ok" | "down";
     error: string | null;

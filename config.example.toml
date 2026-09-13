@@ -57,6 +57,7 @@ size_usd = 100                  # size per leg; converted into the same token co
 min_roi_pct = 0.50              # net ROI by book, after round-trip taker fees, to enter the feed
 candidate_margin_pct = 0.50     # pairs this close to the threshold by best prices get order-book subscriptions
 book_limit = 60                 # pairs with live order books at once
+tracking_limit = 20             # of those, at most this many follow gaps that left the feed until prices converge
 radar_rows = 20                 # best current spreads shown under the feed even below the threshold
 fresh_ms = 1000                 # a leg older than this greys the row out...
 quiet_book_max_ms = 10000       # ...unless its connection delivered frames within fresh_ms: exchanges push books only on change

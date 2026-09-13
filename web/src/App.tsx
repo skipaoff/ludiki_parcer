@@ -9,6 +9,7 @@ import { exchangeTitle, ExchangesSettings, signedMs } from "./Exchanges";
 import { FeedScreen } from "./Feed";
 import { clock, describe, uptime } from "./format";
 import { PairsScreen } from "./Pairs";
+import { StatsScreen } from "./Stats";
 import { useLive, type LinkState } from "./live";
 import { apiGet } from "./session";
 import type { ExchangeState, JournalEvent, Snapshot } from "./types";
@@ -71,7 +72,7 @@ export function App({ token }: { token: string }) {
         {tab === "gaps" && <FeedScreen token={token} snapshot={live.snapshot} />}
         {(tab === "funding" || tab === "unlocks") && <Placeholder text="Раздел появится после MVP." />}
         {tab === "trades" && <Placeholder text="История закрытых пар появится на этапе 6." />}
-        {tab === "stats" && <Placeholder text="Статистика появится на этапе 7. Запись истории вилок — этап 4." />}
+        {tab === "stats" && <StatsScreen token={token} recordedLive={live.snapshot?.history?.recorded} />}
         {tab === "pairs" && <PairsScreen token={token} summary={live.snapshot?.instruments} />}
         {tab === "settings" && <SettingsScreen token={token} snapshot={live.snapshot} now={now} />}
       </main>

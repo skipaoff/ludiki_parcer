@@ -19,7 +19,7 @@ import asyncpg
 import orjson
 
 from app.config.settings import LOOPBACK_HOSTS, DatabaseSettings
-from app.storage.bulk import bulk_insert
+from app.storage.bulk import bulk_insert, identifier
 from app.storage.migrations import migrate
 
 log = logging.getLogger(__name__)
@@ -35,6 +35,20 @@ def is_connection_error(exc: BaseException) -> bool:
             asyncpg.exceptions.OperatorInterventionError,
         ),
     )
+
+
+# Tables whose rows are written more than once during their life (created, then completed).
+UPSERT_KEYS: dict[str, tuple[str, ...]] = {
+    "opportunity_episodes": ("id",),
+    "trades": ("id",),
+    "orders": ("id",),
+}
+
+
+def upsert_tail(keys: tuple[str, ...], columns: tuple[str, ...]) -> str:
+    updates = ", ".join(f"{identifier(column)} = EXCLUDED.{identifier(column)}" for column in columns if column not in keys)
+    target = ", ".join(identifier(key) for key in keys)
+    return f"ON CONFLICT ({target}) DO UPDATE SET {updates}" if updates else f"ON CONFLICT ({target}) DO NOTHING"
 
 
 def _json_dumps(value: Any) -> str:
@@ -119,14 +133,23 @@ class Database:
             await pool.close()
 
     async def insert_batch(self, rows: list[tuple[str, dict[str, Any]]]) -> None:
-        """Insert rows of any tables in one transaction, one verified statement per table and column set."""
+        """
+        Insert rows of any tables in one transaction, one verified statement per table and column set, in the order
+        each group first appeared (a parent row submitted before its children is stored before them).
+        Tables in UPSERT_KEYS are upserted; several versions of one row in a batch collapse to the newest.
+        """
         groups: dict[tuple[str, tuple[str, ...]], list[dict[str, Any]]] = {}
         for table, row in rows:
             groups.setdefault((table, tuple(row)), []).append(row)
         async with self.pool.acquire() as connection:
             async with connection.transaction():
-                for (table, _), group in groups.items():
-                    await bulk_insert(connection, table, group)
+                for (table, columns), group in groups.items():
+                    keys = UPSERT_KEYS.get(table)
+                    if keys is None:
+                        await bulk_insert(connection, table, group)
+                        continue
+                    latest = {tuple(row[key] for key in keys): row for row in group}
+                    await bulk_insert(connection, table, list(latest.values()), tail=upsert_tail(keys, columns))
 
     async def _ensure_cluster(self) -> None:
         if not self._settings.autostart or self._settings.host not in LOOPBACK_HOSTS:

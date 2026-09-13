@@ -98,6 +98,7 @@ class FeedSettings(_Section):
     min_roi_pct: Decimal = Decimal("0.50")
     candidate_margin_pct: Decimal = Field(default=Decimal("0.50"), ge=0)
     book_limit: int = Field(default=60, ge=2, le=200)
+    tracking_limit: int = Field(default=20, ge=0, le=200)
     radar_rows: int = Field(default=20, ge=0, le=100)
     fresh_ms: int = Field(default=1000, ge=100)
     quiet_book_max_ms: int = Field(default=10000, ge=1000)

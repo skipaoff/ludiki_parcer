@@ -34,7 +34,10 @@ from app.instruments.service import InstrumentService
 from app.market.binance_streams import BinanceStreams
 from app.market.mexc_market import MexcMarket
 from app.market.state import MarketState
+from app.market.radar_recorder import RadarRecorder
+from app.storage import history as history_queries
 from app.strategies.price_gap.engine import PriceGapEngine
+from app.strategies.price_gap.recorder import EpisodeRecorder
 from app.strategies.price_gap.settings import FeedSettingsService
 from app.journal.journal import Journal, Level
 from app.keystore.keystore import DB_PASSWORD, SESSION_TOKEN, Keystore
@@ -109,6 +112,18 @@ async def _serve(
         account = exchanges.account_taker_fee_pct(exchange)
         return account if account is not None else default_fees[exchange]
 
+    def feed_snapshot() -> dict[str, Any]:
+        current = engine.settings()
+        return {
+            "size_usd": str(current.size_usd),
+            "min_roi_pct": str(current.min_roi_pct),
+            "taker_fee_pct": {exchange: str(taker_fee_pct(exchange)) for exchange in default_fees},
+            "enter_after_ms": current.enter_after_ms,
+            "exit_hysteresis_pct": str(current.exit_hysteresis_pct),
+            "exit_after_ms": current.exit_after_ms,
+        }
+
+    recorder = EpisodeRecorder(writer.submit, feed_snapshot)
     engine = PriceGapEngine(
         instruments,
         market,
@@ -117,8 +132,20 @@ async def _serve(
         settings.feed,
         taker_fee_pct,
         binance_streams.set_radar,
+        sink=recorder,
     )
     feed_settings = FeedSettingsService(engine, database, journal)
+    radar_recorder = RadarRecorder(instruments, market, writer.submit)
+
+    class History:
+        async def summary(self, hours: int) -> dict[str, Any]:
+            return await history_queries.summary(database.pool, hours)
+
+        async def episodes(self, limit: int) -> list[dict[str, Any]]:
+            return await history_queries.recent_episodes(database.pool, limit)
+
+        async def storage(self) -> dict[str, Any]:
+            return await history_queries.storage_usage(database.pool)
 
     def snapshot() -> dict[str, Any]:
         return {
@@ -133,6 +160,7 @@ async def _serve(
             "exchanges": exchanges.snapshot(),
             "instruments": instruments.summary(),
             "feed": {**engine.view(), "streams": {"binance": binance_streams.stats(), "mexc": mexc_market.stats()}},
+            "history": {"recorded": recorder.recorded, "open": recorder.open_count, "radar_snapshots": radar_recorder.snapshots},
             "pairs": {"open": 0, "limit": 3},
         }
 
@@ -159,6 +187,7 @@ async def _serve(
         exchanges=exchanges,
         instruments=instruments,
         feed_settings=feed_settings,
+        history=History(),
     )
     app = create_app(settings.server, settings.paths.web_dist, context)
     server = _Server(
@@ -176,6 +205,10 @@ async def _serve(
     journal.emit(Level.INFO, "app", "started", version=VERSION, pid=os.getpid())
     await writer.flush(force_connect=True)
     await feed_settings.load()
+    if database.ready:
+        closed = await history_queries.close_dangling_episodes(database.pool)
+        if closed:
+            journal.emit(Level.WARNING, "history", "dangling_episodes_closed", count=closed)
     background = [
         asyncio.create_task(writer.run()),
         asyncio.create_task(hub.run()),
@@ -185,6 +218,7 @@ async def _serve(
         asyncio.create_task(binance_streams.run()),
         asyncio.create_task(mexc_market.run()),
         asyncio.create_task(engine.run()),
+        asyncio.create_task(radar_recorder.run()),
     ]
     server_task = asyncio.create_task(server.serve())
     try:
@@ -206,6 +240,7 @@ async def _serve(
             await asyncio.wait_for(asyncio.shield(server_task), SHUTDOWN_TIMEOUT_S)
         for task in background:
             task.cancel()
+        engine.close()
         await exchanges.close()
         await hub.close()
         await writer.close()
