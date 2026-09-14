@@ -7,6 +7,8 @@ import { useCallback, useEffect, useState } from "react";
 import { compact } from "./Pairs";
 import { apiGet } from "./session";
 
+const TRADING_EXCHANGES = ["binance", "mexc", "gate", "aster", "bingx"];
+
 interface TradeRow {
   id: string;
   token: string;
@@ -144,15 +146,19 @@ export function TradesScreen({ token }: { token: string }) {
         ))}
         <select value={longExchange} onChange={(event) => setLongExchange(event.target.value)}>
           <option value="">лонг: все</option>
-          <option value="binance">лонг BINANCE</option>
-          <option value="mexc">лонг MEXC</option>
-          <option value="gate">лонг GATE</option>
+          {TRADING_EXCHANGES.map((name) => (
+            <option key={name} value={name}>
+              лонг {name.toUpperCase()}
+            </option>
+          ))}
         </select>
         <select value={shortExchange} onChange={(event) => setShortExchange(event.target.value)}>
           <option value="">шорт: все</option>
-          <option value="binance">шорт BINANCE</option>
-          <option value="mexc">шорт MEXC</option>
-          <option value="gate">шорт GATE</option>
+          {TRADING_EXCHANGES.map((name) => (
+            <option key={name} value={name}>
+              шорт {name.toUpperCase()}
+            </option>
+          ))}
         </select>
         <input placeholder="монета" value={coin} onChange={(event) => setCoin(event.target.value)} spellCheck={false} />
         <button className="action" onClick={() => void exportCsv()}>

@@ -50,6 +50,12 @@ enabled = true
 [exchanges.gate]
 enabled = true
 
+[exchanges.aster]
+enabled = true              # keys: the main wallet address and the private key of an API wallet made for it, never the main wallet's key
+
+[exchanges.bingx]
+enabled = true
+
 [exchanges.variational]
 enabled = true              # read-only: Variational Omni has no trading API yet, its gaps are shown but cannot be opened
 poll_ms = 2000              # public statistics limit is 10 requests per 10 seconds per IP
@@ -77,9 +83,13 @@ exit_after_ms = 2000
 default_taker_fee_binance_pct = 0.05   # used until an accepted key check reports the account rate
 default_taker_fee_mexc_pct = 0.05
 default_taker_fee_gate_pct = 0.075     # Gate contract default taker rate
+default_taker_fee_aster_pct = 0.035    # Aster Pro taker rate
+default_taker_fee_bingx_pct = 0.05     # BingX contract default taker rate
 default_taker_fee_variational_pct = 0  # Variational charges no fees, it earns on the spread already inside its quotes
 mexc_ticker_poll_ms = 1000      # MEXC best prices come from REST: the all-symbols websocket has no bid/ask
 gate_ticker_poll_ms = 1000      # Gate best prices, mark, index and volume of all contracts in one REST answer
+bingx_ticker_poll_ms = 1000     # BingX best prices from REST: its websocket bookTicker lags behind the order book
+bingx_premium_poll_ms = 5000    # BingX mark and index prices
 
 [portfolio]
 positions_poll_s = 5            # positions from REST; needs keys
@@ -94,6 +104,8 @@ enabled = false
 leverage_binance = 3
 leverage_mexc = 3
 leverage_gate = 3
+leverage_aster = 3
+leverage_bingx = 3
 isolated = true                 # isolated margin on both legs; false means cross
 entry_min_roi_pct = 0.50        # net ROI by book at the moment of the click; below it no orders leave
 max_open_pairs = 3

@@ -214,3 +214,34 @@ def test_no_gap_stays_on_the_radar_only():
     assert view["rows"] == []
     assert len(view["radar"]) == 1
     assert Decimal(view["radar"][0]["roi_net_pct"]) < 0
+
+
+def test_large_catalog_radar_is_refreshed_a_slice_per_tick():
+    from app.strategies.price_gap import engine as engine_module
+
+    count = engine_module.RADAR_FULL_PASS_PAIRS + 100
+    quote = Quote(mark=Decimal("100"), index=Decimal("100"))
+    records = []
+    for index in range(count):
+        a, b = instrument("binance", f"T{index}USDT", f"T{index}"), instrument("mexc", f"T{index}_USDT", f"T{index}")
+        records.append(PairRecord(key=f"binance:T{index}USDT|mexc:T{index}_USDT", assessment=assess_pair(a, b, quote, quote)))
+    clock = Clock()
+    state = MarketState(clock)
+    catalog = Catalog(records)
+    engine = PriceGapEngine(catalog, state, {"binance": FakeFeed(clock), "mexc": FakeFeed(clock)}, FeedSettings(), lambda exchange: Decimal("0.05"),
+                            lambda instruments: None, clock)
+    engine.tick()
+    for index in range(count):
+        state.set_top("binance", f"T{index}USDT", 100.0, 100.1, 1)
+        state.set_top("mexc", f"T{index}_USDT", 100.5, 100.6, 1)
+
+    seen = []
+    for _ in range(engine_module.RADAR_SLICES):
+        engine.tick()
+        seen.append(len(engine._tops))
+    size = -(-count // engine_module.RADAR_SLICES)
+    assert seen == [size * step for step in range(1, engine_module.RADAR_SLICES)] + [count]
+
+    catalog._records = records[:10]  # pairs that leave the catalog leave the radar at once
+    engine.tick()
+    assert {top.key for top in engine._tops} <= {record.key for record in records[:10]}

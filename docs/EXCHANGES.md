@@ -202,6 +202,84 @@
 
 ---
 
+## Aster Futures (подключена 14.09.2026)
+
+**Библиотека:** в ccxt биржа называется `aster`. API повторяет Binance USDⓈ-M: те же поля, фильтры, коды ошибок — адаптер использует парсеры Binance.
+
+### Публичная часть [проверено 14.09.2026]
+
+| Эндпоинт | Что берём |
+|---|---|
+| `GET https://fapi.asterdex.com/fapi/v1/exchangeInfo` | 594 символа, из них торгуются 562 USDT-бессрочных (`status` `TRADING`, `contractType` `PERPETUAL`, `quoteAsset`/`marginAsset` `USDT`). Остальные — `SETTLING`, `PENDING_TRADING`, котировки `USD1` и `U`. Фильтры как у Binance: `MARKET_LOT_SIZE` (BTC: шаг 0,001, максимум 120), `MIN_NOTIONAL` 5, `PRICE_FILTER`. `1000PEPEUSDT` — цена и количество за 1000 PEPE |
+| `GET /fapi/v1/ticker/bookTicker` (все символы) | `bidPrice`, `askPrice`, `time` — подсев лучших цен тихих контрактов раз в 30 с |
+| `GET /fapi/v1/premiumIndex` | `markPrice`, `indexPrice`; в ответе есть и не-USDT символы (`GNSUSD`) |
+| `GET /fapi/v1/ticker/24hr` | `quoteVolume` |
+| `GET /fapi/v1/time` | `serverTime` — пинг и часы |
+| `wss://fstream.asterdex.com/stream`, `{"method":"SUBSCRIBE","params":[...]}` | один адрес для всех потоков, до 200 потоков на соединение, 10 управляющих сообщений в секунду, соединение живёт 24 часа. **`!bookTicker` (все символы) — в реальном времени**: за 15 с на BTC, ETH, SOL, DOGE, ASTER пришло ровно столько же обновлений, сколько в отдельных `<symbol>@bookTicker` (у Binance этот поток раз в 5 с). Радар Aster — один этот поток. `<symbol>@depth20@100ms` — формат Binance (`depthUpdate`, `b`/`a`), `!markPrice@arr@1s` |
+
+Стакан и лучшие цены сходятся (40 с на шести символах: расхождений при старом стакане нет). У тихих контрактов (OKB) стакан приходит раз в несколько секунд — такие ноги честно получают «устарело», если лучшие цены с ним не совпали.
+
+### Ключи: API-кошелёк, а не API-ключ [док 14.09.2026]
+
+Актуальная документация Aster (futures v3) описывает только подпись кошельком: каждый приватный запрос несёт `user` (адрес основного кошелька), `signer` (адрес API-кошелька) и `nonce` в микросекундах (±60 с от часов сервера) и подписывается EIP-712 (`AsterSignTransaction`, chainId 1666) приватным ключом API-кошелька. API-кошелёк создаётся на https://www.asterdex.com/en/api-wallet.
+
+В терминале поле «ключ» — адрес основного кошелька, поле «секрет» — приватный ключ API-кошелька. ccxt по умолчанию берёт `user` из адреса самого ключа (то есть ждёт ключ основного кошелька); адаптер закрепляет `user` за основным кошельком и отдельно указывает `signer`. Если введён ключ самого основного кошелька (адрес ключа совпал с `user`), проверка аккаунта ставит «вывод включён» и ключ не принимается. Права API-кошелька Aster не сообщает — предупреждение, как у Gate.
+
+### Приватная часть [док, проверить пробной сделкой]
+
+| Эндпоинт | Что делаем |
+|---|---|
+| `GET /fapi/v3/positionSide/dual` | `dualSidePosition` (one-way = `false`) |
+| `GET /fapi/v3/balance` | USDT: `balance`, `availableBalance` |
+| `GET /fapi/v3/accountWithJoinMargin` | `totalMarginBalance`, `availableBalance`, `totalInitialMargin` |
+| `GET /fapi/v3/commissionRate?symbol=BTCUSDT` | `takerCommissionRate`, `makerCommissionRate` долями. Без проверки ключа терминал считает тейкер 0,035% |
+| `GET /fapi/v3/positionRisk` | как `v2/positionRisk` у Binance |
+| `POST /fapi/v3/leverage`, `POST /fapi/v3/marginType` | −4046 «менять не нужно» не ошибка |
+| `POST /fapi/v3/order` | `MARKET`, `newClientOrderId` (`^[.A-Z:/a-z0-9_-]{1,36}$`), `newOrderRespType=RESULT`, `reduceOnly=true` на закрытии |
+| `GET /fapi/v3/order?origClientOrderId=` | −2013 — ордера нет |
+| `GET /fapi/v3/userTrades?orderId=`, `GET /fapi/v3/income?incomeType=FUNDING_FEE` | исполнения и фандинг |
+
+Приватный вебсокет Aster терминал пока не использует.
+
+---
+
+## BingX Perpetual Swap (подключена 14.09.2026)
+
+**Библиотека:** в ccxt биржа называется `bingx`, методы `swap_v2_public_*`, `swap_v2_private_*`. ccxt помечает запросы своим брокерским id (`X-SOURCE-KEY: CCXT`); у BingX есть пары, где брокерские ордера запрещены (`brokerState`), поэтому адаптер этот заголовок убирает. Официальная документация — одностраничное приложение; поля ниже взяты из его исходника (`bingx-api.github.io/docs-v3`).
+
+### Публичная часть [проверено 14.09.2026]
+
+| Эндпоинт | Что берём |
+|---|---|
+| `GET https://open-api.bingx.com/openApi/swap/v2/quote/contracts` | 1224 контракта; терминал берёт `currency` `USDT`, `status` 1 (25 — только закрытие, 5 — до листинга, 0 — выключен), `apiStateOpen` и `apiStateClose` `"true"` — 817. `quantityPrecision` — шаг количества в монетах контракта (у SOL поле `size` равно 1, а шаг 0,01 — `size` терминал не использует, как и ccxt), `tradeMinQuantity` (монеты) и `tradeMinUSDT` — минимумы, `pricePrecision`, `takerFeeRate` 0,0005. Множители в имени: `1000PEPE-USDT`, `10000SATS-USDT`, `1000000MOG-USDT`; `PEPE-USDT` снят. Около 590 контрактов `NC…2USD-USDT` — форекс, акции, сырьё; с криптобиржами они не пересекаются |
+| `GET /openApi/swap/v2/quote/ticker` (все символы) | `bidPrice`, `askPrice`, `quoteVolume` — радар BingX, опрос раз в секунду |
+| `GET /openApi/swap/v2/quote/premiumIndex` (все символы) | `markPrice`, `indexPrice`, опрос раз в 5 с |
+| `GET /openApi/swap/v2/quote/bookTicker` | только с `symbol` (без него код 109400) |
+| `GET /openApi/swap/v2/server/time` | `data.serverTime` |
+| `wss://open-api-swap.bingx.com/swap-market` | **кадры сжаты gzip**; подписка `{"id","reqType":"sub","dataType":"BTC-USDT@depth20@100ms"}`; сервер присылает текст `Ping` и ждёт `Pong`. **Не больше 200 подписок на соединение** (201-я — код 80403), терминал держит до 50. Стакан: `data.bids`/`asks` — `[цена, количество в монетах контракта]`, `ts` |
+
+**Лучшие цены берутся из REST, а не из вебсокета [проверено 14.09.2026].** Поток `<symbol>@bookTicker` отставал и стоял шире стакана: верх вебсокетного стакана совпал с REST-ценами 58 раз из 60, с `@bookTicker` — 14 раз. REST-тикер обновляется примерно так же, как REST `bookTicker`; у тихих альтов цена меняется раз в несколько секунд.
+
+### Приватная часть [док, проверить пробной сделкой]
+
+| Эндпоинт | Что делаем |
+|---|---|
+| `GET /openApi/v1/account/apiPermissions` | `permissions`: 1 спот, 2 чтение, 3 фьючерсы, 4 переводы, **5 вывод**, 7 переводы субаккаунтов; `ipAddresses` |
+| `GET /openApi/swap/v1/positionSide/dual` | `dualSidePosition` `"true"`/`"false"` |
+| `GET /openApi/swap/v3/user/balance` | USDT: `balance`, `equity`, `availableMargin`, `usedMargin`, `freezedMargin` |
+| `GET /openApi/swap/v2/user/commissionRate` | `data.commission.takerCommissionRate` долями |
+| `GET /openApi/swap/v2/user/positions` | `positionAmt` в монетах, `positionSide` LONG/SHORT, `avgPrice`, `markPrice`, `liquidationPrice` (0 — нет), `isolated`, `leverage`. Код 109500 — сбой запроса, а не «позиций нет» |
+| `GET`/`POST /openApi/swap/v2/trade/marginType` | `ISOLATED`/`CROSSED`; адаптер меняет, только если режим другой |
+| `POST /openApi/swap/v2/trade/leverage` | в one-way только `side=BOTH` |
+| `POST /openApi/swap/v2/trade/order` | `MARKET`, `positionSide=BOTH`, `quantity` в монетах, `clientOrderID` (1–40 символов, **BingX приводит его к нижнему регистру** — id терминала и так строчные), `reduceOnly=true` на закрытии. Ответ — только `orderId`, поэтому сразу за ним читается статус |
+| `GET /openApi/swap/v2/trade/order?clientOrderId=` | `status` NEW/PENDING/PARTIALLY_FILLED/FILLED/CANCELLED/FAILED, `executedQty`, `avgPrice`; 80016/80017 — ордера нет |
+| `GET /openApi/swap/v2/trade/allFillOrders` | обязательны `tradingUnit` (`COIN`), `startTs`, `endTs`; у исполнений нет своего id — адаптер строит его из `orderId`, времени и порядкового номера. Если сумма `volume` совпадёт с исполненным количеством в токенах, а не в монетах контракта (для `1000PEPE`), адаптер пересчитает — единицы подтвердит пробная сделка |
+| `GET /openApi/swap/v2/user/income?incomeType=FUNDING_FEE` | фандинг |
+
+Приватный вебсокет BingX терминал пока не использует.
+
+---
+
 ## Variational Omni (подключён только на чтение 14.09.2026)
 
 - **Торгового API нет** [док 14.09.2026]: «The trading API is still in development, and is not yet available to any users». Пары с Variational видны в каталоге и на экране «Пары», открыть их нельзя.
@@ -223,8 +301,6 @@
 | Bybit | `bybit` | `GET https://api.bybit.com/v5/market/tickers?category=linear` | `lastPrice` | `turnover24h` | |
 | OKX | `okx` | `GET https://www.okx.com/api/v5/market/tickers?instType=SWAP` | `last` | `volCcy24h` | у SWAP `volCcy24h`, похоже, в базовой монете, а не в $ — парсер считал его долларами [проверить]. Торгуется контрактами |
 | Bitget | `bitget` | `GET https://api.bitget.com/api/v2/mix/market/tickers?productType=USDT-FUTURES` | `lastPr` | `quoteVolume` | |
-| BingX | `bingx` | `GET https://open-api.bingx.com/openApi/swap/v2/quote/ticker` | `lastPrice` | `quoteVolume` | |
 | Phemex | `phemex` | `GET https://api.phemex.com/md/v3/ticker/24hr/all?type=Perpetual` | `lastRp` | `turnoverRp` (в парсере делится на 1e8) | масштаб поля [проверить] |
 | Hyperliquid | `hyperliquid` | `POST https://api.hyperliquid.xyz/info` `{"type":"metaAndAssetCtxs"}` | `midPx` | `dayNtlVlm` | префикс `k` = ×1000. Торговля через API-кошелёк без права вывода, а не API-ключ |
-| Aster | `aster` | `GET https://fapi.asterdex.com/fapi/v1/ticker/24hr` | `lastPrice` | `quoteVolume` | формат API как у Binance |
 | KuCoin Futures | `kucoinfutures` | (в парсере только фандинг) `GET https://api-futures.kucoin.com/api/v1/contracts/active` | — | — | `XBT` = BTC, суффикс `USDTM` |

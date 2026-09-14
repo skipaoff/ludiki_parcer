@@ -1,11 +1,11 @@
 """
-VFP: Binance USDⓈ-M market streams into MarketState — bookTicker of every pair for the radar, depth20@100ms for candidates.
-Changes when: Binance stream routes, payloads or per-connection limits change.
+VFP: Binance-format futures market streams into MarketState — best prices of every pair for the radar, depth20@100ms for candidates. Serves Binance USDⓈ-M and Aster, which speaks the same protocol.
+Changes when: Binance or Aster stream routes, payloads or per-connection limits change.
 Anti-goal:
-1. The all-symbols !bookTicker stream — it updates only every 5 seconds.
-2. More than 200 streams on one connection — Binance futures refuses them.
+1. Binance's all-symbols !bookTicker stream — it updates only every 5 seconds there. Aster's is real time and is used.
+2. More than 200 streams on one connection — both exchanges refuse them.
 
-Payloads checked live on 13.09.2026 (docs/EXCHANGES.md).
+Payloads checked live: Binance on 13.09.2026, Aster on 14.09.2026 (docs/EXCHANGES.md).
 """
 
 from __future__ import annotations
@@ -26,7 +26,10 @@ log = logging.getLogger(__name__)
 PUBLIC_URL = "wss://fstream.binance.com/public/stream"
 MARKET_URL = "wss://fstream.binance.com/market/stream"
 MARK_PRICE_STREAM = "!markPrice@arr@1s"
+ALL_BOOK_TICKERS_STREAM = "!bookTicker"
 BOOK_TICKER_URL = "https://fapi.binance.com/fapi/v1/ticker/bookTicker"
+ASTER_URL = "wss://fstream.asterdex.com/stream"
+ASTER_BOOK_TICKER_URL = "https://fapi.asterdex.com/fapi/v1/ticker/bookTicker"
 SEED_INTERVAL_S = 30
 STREAMS_PER_CONNECTION = 200
 PARAMS_PER_MESSAGE = 50
@@ -45,45 +48,62 @@ def control_messages(streams: list[str], subscribe: bool) -> Iterable[str]:
     yield orjson.dumps({"method": "SUBSCRIBE" if subscribe else "UNSUBSCRIBE", "params": streams, "id": 1}).decode()
 
 
-def handle_frame(state: MarketState, raw: str | bytes) -> None:
+def handle_frame(state: MarketState, raw: str | bytes, exchange: str = EXCHANGE) -> None:
     message: dict[str, Any] = orjson.loads(raw)
     data = message.get("data")
     if data is None:
         if message.get("error"):
-            log.warning("binance stream error: %s", message["error"])
+            log.warning("%s stream error: %s", exchange, message["error"])
         return
     if isinstance(data, list):
         # !markPrice@arr@1s: every symbol once a second.
         for item in data:
             if item.get("e") == "markPriceUpdate":
-                state.set_mark(EXCHANGE, item["s"], float(item["p"]), float(item["i"]) if item.get("i") else None)
+                state.set_mark(exchange, item["s"], float(item["p"]), float(item["i"]) if item.get("i") else None)
         return
-    state.count(EXCHANGE)
+    state.count(exchange)
     kind = data.get("e")
     if kind == "bookTicker":
-        state.set_top(EXCHANGE, data["s"], float(data["b"]), float(data["a"]), int(data.get("T") or data.get("E") or 0))
+        state.set_top(exchange, data["s"], float(data["b"]), float(data["a"]), int(data.get("T") or data.get("E") or 0))
     elif kind == "depthUpdate":
-        state.set_book(EXCHANGE, data["s"], data["b"], data["a"], int(data.get("T") or data.get("E") or 0))
+        state.set_book(exchange, data["s"], data["b"], data["a"], int(data.get("T") or data.get("E") or 0))
 
 
 class BinanceStreams:
-    def __init__(self, state: MarketState) -> None:
+    def __init__(
+        self,
+        state: MarketState,
+        exchange: str = EXCHANGE,
+        public_url: str = PUBLIC_URL,
+        market_url: str = MARKET_URL,
+        book_ticker_url: str = BOOK_TICKER_URL,
+        all_book_tickers: bool = False,
+    ) -> None:
+        """all_book_tickers: take radar prices from the one all-symbols stream instead of a stream per symbol."""
         self._state = state
+        self._exchange = exchange
+        self._public_url = public_url
+        self._book_ticker_url = book_ticker_url
+        self._all_book_tickers = all_book_tickers
         self._radar: list[ManagedSocket] = []
-        self._depth = self._socket("binance-depth")
-        self._marks = self._socket("binance-marks", MARKET_URL)
+        self._depth = self._socket(f"{exchange}-depth")
+        self._marks = self._socket(f"{exchange}-marks", market_url)
         self._marks.set_desired([MARK_PRICE_STREAM])
         self._tasks: dict[ManagedSocket, asyncio.Task] = {}
         self._radar_symbols: list[str] = []
+        if all_book_tickers:
+            socket = self._socket(f"{exchange}-radar-1")
+            socket.set_desired([ALL_BOOK_TICKERS_STREAM])
+            self._radar.append(socket)
 
     def _socket(self, name: str, url: str = "") -> ManagedSocket:
         return ManagedSocket(
             name,
-            url or PUBLIC_URL,
-            lambda raw: handle_frame(self._state, raw),
+            url or self._public_url,
+            lambda raw: handle_frame(self._state, raw, self._exchange),
             control_messages,
             batch_size=PARAMS_PER_MESSAGE,
-            send_interval_s=0.25,  # Binance allows 10 control messages per second per connection
+            send_interval_s=0.25,  # both exchanges allow 10 control messages per second per connection
         )
 
     def set_radar(self, symbols: Iterable[str]) -> None:
@@ -91,9 +111,11 @@ class BinanceStreams:
         if ordered == self._radar_symbols:
             return
         self._radar_symbols = ordered
+        if self._all_book_tickers:
+            return
         chunks = [ordered[i : i + STREAMS_PER_CONNECTION] for i in range(0, len(ordered), STREAMS_PER_CONNECTION)]
         while len(self._radar) < len(chunks):
-            socket = self._socket(f"binance-radar-{len(self._radar) + 1}")
+            socket = self._socket(f"{self._exchange}-radar-{len(self._radar) + 1}")
             self._radar.append(socket)
             self._start(socket)
         for index, socket in enumerate(self._radar):
@@ -129,17 +151,17 @@ class BinanceStreams:
         async with aiohttp.ClientSession(timeout=timeout) as session:
             while True:
                 try:
-                    async with session.get(BOOK_TICKER_URL) as response:
+                    async with session.get(self._book_ticker_url) as response:
                         for item in orjson.loads(await response.read()):
-                            key = (EXCHANGE, item["symbol"])
+                            key = (self._exchange, item["symbol"])
                             ts = int(item.get("time") or 0)
                             current = self._state.tops.get(key)
                             if current is None or current.exchange_ts_ms < ts:
-                                self._state.set_top(EXCHANGE, item["symbol"], float(item["bidPrice"]), float(item["askPrice"]), ts)
+                                self._state.set_top(self._exchange, item["symbol"], float(item["bidPrice"]), float(item["askPrice"]), ts)
                 except asyncio.CancelledError:
                     raise
                 except Exception as exc:
-                    log.warning("binance book ticker seed failed: %s: %s", type(exc).__name__, exc)
+                    log.warning("%s book ticker seed failed: %s: %s", self._exchange, type(exc).__name__, exc)
                 await asyncio.sleep(SEED_INTERVAL_S)
 
     def _start(self, socket: ManagedSocket) -> None:
@@ -155,7 +177,19 @@ class BinanceStreams:
         return {
             "connections": sum(1 for socket in sockets if socket.connected),
             "sockets": len(sockets),
-            "radar_streams": sum(len(socket.desired) for socket in self._radar),
+            "radar_streams": len(self._radar_symbols) if self._all_book_tickers else sum(len(socket.desired) for socket in self._radar),
             "depth_streams": len(self._depth.desired),
             "reconnects": sum(socket.reconnects for socket in sockets),
         }
+
+
+def aster_streams(state: MarketState) -> BinanceStreams:
+    """Aster: one host for every stream, and its all-symbols bookTicker is real time (matched per-symbol streams 1:1, 14.09.2026)."""
+    return BinanceStreams(
+        state,
+        exchange="aster",
+        public_url=ASTER_URL,
+        market_url=ASTER_URL,
+        book_ticker_url=ASTER_BOOK_TICKER_URL,
+        all_book_tickers=True,
+    )

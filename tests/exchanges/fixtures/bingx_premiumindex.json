@@ -1,0 +1,83 @@
+{
+ "code": 0,
+ "msg": "",
+ "data": [
+  {
+   "symbol": "BTC-USDT",
+   "markPrice": "77676.8",
+   "indexPrice": "77715.4",
+   "lastFundingRate": "0.00006100",
+   "nextFundingTime": 1789401600000,
+   "fundingIntervalHours": 8,
+   "minFundingRate": "-0.003000",
+   "maxFundingRate": "0.003000",
+   "updateTime": 1789372800000
+  },
+  {
+   "symbol": "SOL-USDT",
+   "markPrice": "101.420",
+   "indexPrice": "101.465",
+   "lastFundingRate": "0.00010000",
+   "nextFundingTime": 1789401600000,
+   "fundingIntervalHours": 8,
+   "minFundingRate": "-0.005000",
+   "maxFundingRate": "0.005000",
+   "updateTime": 1789372800000
+  },
+  {
+   "symbol": "DOGE-USDT",
+   "markPrice": "0.08413",
+   "indexPrice": "0.08418",
+   "lastFundingRate": "0.00008400",
+   "nextFundingTime": 1789401600000,
+   "fundingIntervalHours": 8,
+   "minFundingRate": "-0.005000",
+   "maxFundingRate": "0.005000",
+   "updateTime": 1789372800000
+  },
+  {
+   "symbol": "1000PEPE-USDT",
+   "markPrice": "0.0034411",
+   "indexPrice": "0.0034413",
+   "lastFundingRate": "0.00010000",
+   "nextFundingTime": 1789401600000,
+   "fundingIntervalHours": 8,
+   "minFundingRate": "-0.02",
+   "maxFundingRate": "0.02",
+   "updateTime": 1789372800000
+  },
+  {
+   "symbol": "BTC-USDC",
+   "markPrice": "77652.7",
+   "indexPrice": "77690.3",
+   "lastFundingRate": "0.00006200",
+   "nextFundingTime": 1789401600000,
+   "fundingIntervalHours": 8,
+   "minFundingRate": "-0.003000",
+   "maxFundingRate": "0.003000",
+   "updateTime": 1789372800000
+  },
+  {
+   "symbol": "1000000MOG-USDT",
+   "markPrice": "0.1029",
+   "indexPrice": "0.1029",
+   "lastFundingRate": "0.00010000",
+   "nextFundingTime": 1789387200000,
+   "fundingIntervalHours": 4,
+   "minFundingRate": "-0.02",
+   "maxFundingRate": "0.02",
+   "updateTime": 1789372800000
+  },
+  {
+   "symbol": "NCSKRIOT2USD-USDT",
+   "markPrice": "20.62",
+   "indexPrice": "20.62",
+   "lastFundingRate": "0.00005000",
+   "nextFundingTime": 1789401600000,
+   "fundingIntervalHours": 8,
+   "minFundingRate": "-0.02",
+   "maxFundingRate": "0.02",
+   "updateTime": 1789372800000
+  }
+ ]
+}

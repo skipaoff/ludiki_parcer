@@ -31,7 +31,8 @@ from app.api.server import APP_NAME, ApiContext, create_app
 from app.config.settings import REPO_ROOT, Settings, load_settings
 from app.exchanges.service import ExchangeService
 from app.instruments.service import InstrumentService
-from app.market.binance_streams import BinanceStreams
+from app.market.binance_streams import BinanceStreams, aster_streams
+from app.market.bingx_market import BingxMarket
 from app.market.gate_market import GateMarket
 from app.market.mexc_market import MexcMarket
 from app.market.variational_market import VariationalMarket
@@ -116,14 +117,19 @@ async def _serve(
         feeds["mexc"] = MexcMarket(market, settings.feed.mexc_ticker_poll_ms)
     if "gate" in exchanges.names:
         feeds["gate"] = GateMarket(market, settings.feed.gate_ticker_poll_ms)
+    if "aster" in exchanges.names:
+        feeds["aster"] = aster_streams(market)
+    if "bingx" in exchanges.names:
+        feeds["bingx"] = BingxMarket(market, settings.feed.bingx_ticker_poll_ms, settings.feed.bingx_premium_poll_ms)
     if "variational" in exchanges.names:
         feeds["variational"] = VariationalMarket(
             market, lambda: exchanges.adapter("variational"), settings.exchanges.variational.poll_ms
         )
 
     def on_catalog(contracts: list[Any]) -> None:
-        if "binance" in feeds:
-            feeds["binance"].set_radar(item.symbol_raw for item in contracts if item.exchange == "binance")
+        for name in ("binance", "aster"):
+            if name in feeds:
+                feeds[name].set_radar(item.symbol_raw for item in contracts if item.exchange == name)
 
     def taker_fee_pct(exchange: str) -> Decimal:
         account = exchanges.account_taker_fee_pct(exchange)

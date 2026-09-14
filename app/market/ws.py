@@ -27,7 +27,7 @@ class ManagedSocket:
         self,
         name: str,
         url: str,
-        on_message: Callable[[str | bytes], None],
+        on_message: Callable[[str | bytes], str | None],
         build_messages: BuildMessages,
         batch_size: int,
         send_interval_s: float,
@@ -72,9 +72,13 @@ class ManagedSocket:
                         async for raw in socket:
                             self.last_message_ms = time.time() * 1000
                             try:
-                                self._on_message(raw)
+                                reply = self._on_message(raw)
                             except Exception:
                                 self._log_handler_error()
+                                continue
+                            if reply is not None:
+                                # Exchanges with application-level server pings (BingX "Ping") expect an answer.
+                                await socket.send(reply)
                     finally:
                         for helper in helpers:
                             helper.cancel()

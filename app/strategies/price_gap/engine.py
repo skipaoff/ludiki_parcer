@@ -16,6 +16,7 @@ import logging
 import time
 from dataclasses import dataclass
 from decimal import Decimal
+from operator import attrgetter
 from typing import Any, Callable, Mapping, Protocol
 
 from app.config.settings import FeedSettings
@@ -36,6 +37,9 @@ CHOOSE_EVERY_MS = 1_000
 CAPACITY_EVERY_MS = 1_000
 TOP_STALE_MS = 60_000  # radar only ranks candidates; quiet contracts are re-seeded from REST every 30 s
 RESUBSCRIBE_COOLDOWN_MS = 5_000
+RADAR_SLICES = 5  # a large catalog's radar is refreshed over this many ticks
+RADAR_FULL_PASS_PAIRS = 500  # up to this many pairs the whole radar is refreshed every tick
+_net_roi = attrgetter("roi_net_pct")
 
 
 class Catalog(Protocol):
@@ -130,6 +134,12 @@ class PriceGapEngine:
         )
         self._catalog_keys: frozenset[str] = frozenset()
         self._records: dict[str, PairRecord] = {}
+        # Per pair key: (exchange a, market key a, exchange b, market key b) — fixed for a key, built once per catalog.
+        self._legs: dict[str, tuple[str, tuple[str, str], str, tuple[str, str]]] = {}
+        self._catalog_exchanges: frozenset[str] = frozenset()
+        self._radar_keys: list[str] = []
+        self._radar_cursor = 0
+        self._top_by_key: dict[str, TopRoi] = {}
         self._books: dict[str, int] = {}
         self._last_choose_ms = 0.0
         self._quotes: dict[str, _Quote] = {}
@@ -184,6 +194,19 @@ class PriceGapEngine:
             return
         self._catalog_keys = keys
         self._records = {record.key: record for record in records}
+        self._legs = {
+            record.key: (
+                record.assessment.a.exchange,
+                (record.assessment.a.exchange, record.assessment.a.symbol_raw),
+                record.assessment.b.exchange,
+                (record.assessment.b.exchange, record.assessment.b.symbol_raw),
+            )
+            for record in records
+        }
+        self._catalog_exchanges = frozenset(exchange for legs in self._legs.values() for exchange in (legs[0], legs[2]))
+        self._radar_keys = list(self._legs)
+        self._radar_cursor = 0
+        self._top_by_key = {key: top for key, top in self._top_by_key.items() if key in keys}
         unique = {(leg.exchange, leg.symbol_raw): leg for record in records for leg in (record.assessment.a, record.assessment.b)}
         instruments = list(unique.values())
         self._state.set_instruments(instruments)
@@ -197,23 +220,39 @@ class PriceGapEngine:
         return TOP_STALE_MS if override is None else min(TOP_STALE_MS, override)
 
     def _radar(self, now: float) -> list[TopRoi]:
-        tops = []
-        for key, record in self._records.items():
-            if not _worth_watching(record):
-                continue
-            a, b = record.assessment.a, record.assessment.b
-            top_a = self._state.tops.get((a.exchange, a.symbol_raw))
-            top_b = self._state.tops.get((b.exchange, b.symbol_raw))
-            if top_a is None or top_b is None:
-                continue
-            if now - top_a.received_ms > self._top_limit_ms(a.exchange) or now - top_b.received_ms > self._top_limit_ms(b.exchange):
-                continue
-            round_trip = float(self._fees(a, b).round_trip_pct)
-            roi = best_price_roi(key, a.exchange, top_a.bid, top_a.ask, b.exchange, top_b.bid, top_b.ask, round_trip)
-            if roi is not None:
-                tops.append(roi)
-        tops.sort(key=lambda top: top.roi_net_pct, reverse=True)
-        return tops
+        """
+        Best-price ROI of every pair, ranked. A large catalog is refreshed a slice per tick, so one tick never stalls the
+        event loop for the whole catalog (6,800 pairs over six exchanges took 85 ms a pass); each pair is still refreshed
+        within RADAR_SLICES ticks, and books are chosen only once a second anyway.
+        """
+        keys = self._radar_keys
+        if len(keys) <= RADAR_FULL_PASS_PAIRS:
+            batch, self._radar_cursor = keys, 0
+        else:
+            size = -(-len(keys) // RADAR_SLICES)
+            start = self._radar_cursor
+            batch = keys[start : start + size]
+            self._radar_cursor = start + size if start + size < len(keys) else 0
+        # Fees and age limits are looked up once per exchange, not per pair.
+        fee = {exchange: float(self._taker_fee_pct(exchange)) for exchange in self._catalog_exchanges}
+        oldest = {exchange: now - self._top_limit_ms(exchange) for exchange in self._catalog_exchanges}
+        market_tops = self._state.tops
+        ranked = self._top_by_key
+        for key in batch:
+            record = self._records.get(key)
+            roi = None
+            if record is not None and _worth_watching(record):
+                exchange_a, market_a, exchange_b, market_b = self._legs[key]
+                top_a = market_tops.get(market_a)
+                top_b = market_tops.get(market_b)
+                if top_a is not None and top_b is not None and top_a.received_ms >= oldest[exchange_a] and top_b.received_ms >= oldest[exchange_b]:
+                    round_trip = (fee[exchange_a] + fee[exchange_b]) * 2  # entry and exit on both legs, as Fees.round_trip_pct
+                    roi = best_price_roi(key, exchange_a, top_a.bid, top_a.ask, exchange_b, top_b.bid, top_b.ask, round_trip)
+            if roi is None:
+                ranked.pop(key, None)
+            else:
+                ranked[key] = roi
+        return sorted(ranked.values(), key=_net_roi, reverse=True)
 
     def _choose(self, now: float) -> None:
         by_peak = sorted(self._episodes.items(), key=lambda item: item[1].roi_peak or Decimal(0), reverse=True)

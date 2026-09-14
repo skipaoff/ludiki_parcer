@@ -20,8 +20,10 @@ from typing import Any, Callable
 
 from app.config.settings import READ_ONLY_EXCHANGES, ExchangesSettings
 from app.core.account import AccountFacts, judge
+from app.exchanges.aster import adapter as aster
 from app.exchanges.base import ExchangeAdapter
 from app.exchanges.binance.adapter import BinanceAdapter
+from app.exchanges.bingx.adapter import BingxAdapter
 from app.exchanges.ccxt_support import describe_error
 from app.exchanges.gate.adapter import GateAdapter
 from app.exchanges.mexc.adapter import MexcAdapter
@@ -53,6 +55,10 @@ def default_adapter_factory(name: str, key: str | None, secret: str | None, sett
         return MexcAdapter(key, secret, timeout_s=settings.request_timeout_s)
     if name == "gate":
         return GateAdapter(key, secret, timeout_s=settings.request_timeout_s)
+    if name == "aster":
+        return aster.AsterAdapter(key, secret, timeout_s=settings.request_timeout_s)
+    if name == "bingx":
+        return BingxAdapter(key, secret, timeout_s=settings.request_timeout_s)
     if name == "variational":
         return VariationalAdapter(timeout_s=settings.request_timeout_s, min_interval_ms=settings.variational.poll_ms)
     raise UnknownExchange(name)
@@ -156,7 +162,11 @@ class ExchangeService:
         if self.read_only(name):
             raise InvalidKeys(f"{name} has no trading API, keys are not used")
         api_key, api_secret = api_key.strip(), api_secret.strip()
-        if not KEY_PATTERN.match(api_key) or not KEY_PATTERN.match(api_secret):
+        if name == "aster":
+            # Aster signs with a wallet: the main wallet address and the private key of an API wallet made for it.
+            if not aster.valid_keys(api_key, api_secret):
+                raise InvalidKeys("Aster: the key is the main wallet address (0x + 40 hex), the secret is the API wallet private key (64 hex)")
+        elif not KEY_PATTERN.match(api_key) or not KEY_PATTERN.match(api_secret):
             raise InvalidKeys("key and secret must be 8–256 visible ASCII characters without spaces")
         slot = self._slot(name)
         self._keystore.set(api_key_name(slot), api_key)

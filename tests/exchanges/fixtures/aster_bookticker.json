@@ -1,0 +1,47 @@
+[
+ {
+  "symbol": "BTCUSDT",
+  "bidPrice": "77674.2",
+  "bidQty": "0.513",
+  "askPrice": "77674.3",
+  "askQty": "0.363",
+  "time": 1789375567350,
+  "lastUpdateId": 542619330221
+ },
+ {
+  "symbol": "ETHUSDT",
+  "bidPrice": "2519.26",
+  "bidQty": "1.733",
+  "askPrice": "2519.27",
+  "askQty": "3.720",
+  "time": 1789375567350,
+  "lastUpdateId": 542619330125
+ },
+ {
+  "symbol": "DOGEUSDT",
+  "bidPrice": "0.084120",
+  "bidQty": "1079978",
+  "askPrice": "0.084130",
+  "askQty": "16472",
+  "time": 1789375567350,
+  "lastUpdateId": 542619329777
+ },
+ {
+  "symbol": "1000PEPEUSDT",
+  "bidPrice": "0.0034420",
+  "bidQty": "3489133",
+  "askPrice": "0.0034429",
+  "askQty": "23892",
+  "time": 1789375567350,
+  "lastUpdateId": 542619329652
+ },
+ {
+  "symbol": "BTCUSD1",
+  "bidPrice": "77669.60",
+  "bidQty": "0.251",
+  "askPrice": "77670.90",
+  "askQty": "0.251",
+  "time": 1789375567350,
+  "lastUpdateId": 542619329781
+ }
+]

@@ -23,6 +23,23 @@ const VERDICT_TEXT: Record<string, string> = {
   clock_offset: "часы компьютера расходятся с биржей — включите синхронизацию времени Windows",
 };
 
+// What the two key fields hold on exchanges that do not use a plain API key and secret.
+const KEY_FIELDS: Record<string, { key: string; secret: string; hint: string }> = {
+  aster: {
+    key: "Кошелёк",
+    secret: "Ключ API-кошелька",
+    hint:
+      "Aster подписывает запросы кошельком. «Кошелёк» — адрес основного кошелька (0x…), с которым вы входите на Aster. " +
+      "«Ключ API-кошелька» — приватный ключ API-кошелька, созданного для него на asterdex.com/en/api-wallet. " +
+      "Никогда не вводите приватный ключ основного кошелька: им можно вывести средства, терминал такой ключ не примет.",
+  },
+  bingx: {
+    key: "API key",
+    secret: "Secret",
+    hint: "Права ключа BingX: чтение и торговля бессрочными фьючерсами. Вывод и переводы не включайте.",
+  },
+};
+
 export function exchangeTitle(exchange: { name: string; demo: boolean }): string {
   return exchange.name.toUpperCase() + (exchange.demo ? "·ДЕМО" : "");
 }
@@ -88,6 +105,7 @@ function ExchangeCard({
   const [busy, setBusy] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const link = live ?? exchange;
+  const fields = KEY_FIELDS[exchange.name] ?? { key: "API key", secret: "Secret", hint: "" };
 
   useEffect(() => {
     if (exchange.key_masked === null) setEditing(true);
@@ -175,12 +193,13 @@ function ExchangeCard({
             void save();
           }}
         >
+          {fields.hint && <p className="muted">{fields.hint}</p>}
           <label>
-            <span>API key</span>
+            <span>{fields.key}</span>
             <input type="password" value={apiKey} onChange={(event) => setApiKey(event.target.value)} spellCheck={false} />
           </label>
           <label>
-            <span>Secret</span>
+            <span>{fields.secret}</span>
             <input
               type="password"
               value={apiSecret}

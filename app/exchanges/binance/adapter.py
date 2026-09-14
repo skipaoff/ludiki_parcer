@@ -31,10 +31,11 @@ def _filters(symbol: dict[str, Any]) -> dict[str, dict[str, Any]]:
     return {item["filterType"]: item for item in symbol.get("filters", [])}
 
 
-def parse_instruments(exchange_info: dict[str, Any]) -> list[Instrument]:
+def parse_instruments(exchange_info: dict[str, Any], exchange: str = "binance") -> list[Instrument]:
     """
     GET /fapi/v1/exchangeInfo — USDT-margined perpetuals that are trading now.
     Market orders obey MARKET_LOT_SIZE (falls back to LOT_SIZE); 1000PEPEUSDT quantity and price are per 1000 tokens.
+    Aster answers in the same shape, hence the exchange argument.
     """
     instruments = []
     for symbol in exchange_info.get("symbols", []):
@@ -45,7 +46,7 @@ def parse_instruments(exchange_info: dict[str, Any]) -> list[Instrument]:
             or symbol.get("status") != "TRADING"
         ):
             continue
-        parsed = parse_symbol(symbol["symbol"], "binance")
+        parsed = parse_symbol(symbol["symbol"], exchange)
         if parsed is None:
             continue
         filters = _filters(symbol)
@@ -55,7 +56,7 @@ def parse_instruments(exchange_info: dict[str, Any]) -> list[Instrument]:
             step = Decimal(str(filters["LOT_SIZE"]["stepSize"]))
         instruments.append(
             Instrument(
-                exchange="binance",
+                exchange=exchange,
                 symbol_raw=symbol["symbol"],
                 token=parsed.token,
                 qty_unit_tokens=parsed.multiplier,
@@ -100,7 +101,7 @@ def _positive(value: Any) -> Decimal | None:
     return number if number > 0 else None
 
 
-def parse_positions(raw: list[dict[str, Any]], instruments: Mapping[str, Instrument]) -> list[Position]:
+def parse_positions(raw: list[dict[str, Any]], instruments: Mapping[str, Instrument], exchange: str = "binance") -> list[Position]:
     """
     GET /fapi/v2/positionRisk — one-way mode rows (positionSide BOTH); the sign of positionAmt is the side.
     positionAmt is in contract units (1000PEPEUSDT: lots of 1000 PEPE) and prices are per unit; converted per token.
@@ -117,7 +118,7 @@ def parse_positions(raw: list[dict[str, Any]], instruments: Mapping[str, Instrum
         margin = str(item.get("marginType") or "").lower() or None
         positions.append(
             Position(
-                exchange="binance",
+                exchange=exchange,
                 symbol_raw=item["symbol"],
                 token=instrument.token,
                 side=LegSide.LONG if amount > 0 else LegSide.SHORT,
@@ -133,10 +134,10 @@ def parse_positions(raw: list[dict[str, Any]], instruments: Mapping[str, Instrum
     return positions
 
 
-def parse_balance(raw: dict[str, Any]) -> Balance:
+def parse_balance(raw: dict[str, Any], exchange: str = "binance") -> Balance:
     """GET /fapi/v3/account — margin balance (wallet plus unrealized PnL), available balance and initial margin in use."""
     return Balance(
-        exchange="binance",
+        exchange=exchange,
         equity_usd=Decimal(str(raw["totalMarginBalance"])),
         available_usd=Decimal(str(raw["availableBalance"])),
         margin_used_usd=Decimal(str(raw.get("totalInitialMargin") or "0")),

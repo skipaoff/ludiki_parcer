@@ -107,6 +107,19 @@ async def test_invalid_keys_are_refused_without_touching_the_keystore():
     assert harness.backend.values == {}
 
 
+async def test_aster_keys_must_be_a_wallet_address_and_a_private_key():
+    harness = Harness()
+    service = harness.build()
+    with pytest.raises(InvalidKeys):
+        await service.save_keys("aster", "aster-api-key-123456", "aster-secret-123456")
+    assert harness.backend.values == {}
+
+    await service.save_keys("aster", "0x" + "ab" * 20, "0x" + "11" * 32)
+
+    assert harness.backend.values[("ludik", "aster:api_key")] == "0x" + "ab" * 20
+    assert harness.adapters[-1].name == "aster"
+
+
 async def test_demo_mode_keeps_demo_keys_apart():
     harness = Harness(ExchangesSettings(binance=BinanceSettings(demo=True)))
     service = harness.build()
