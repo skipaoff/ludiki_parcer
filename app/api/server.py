@@ -13,12 +13,13 @@ import asyncio
 import contextlib
 import secrets
 from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any, Awaitable, Callable, Protocol
 
 import orjson
 from fastapi import Depends, FastAPI, HTTPException, Query, Request, WebSocket
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, PlainTextResponse
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 from starlette.staticfiles import StaticFiles
 
@@ -29,6 +30,7 @@ from app.instruments.service import InstrumentService, UnknownPair
 from app.core.schemas import LegSide
 from app.execution.service import ExecutionService, TradingError
 from app.portfolio.service import PortfolioError, PortfolioService
+from app.storage.trades_history import TradeFilter
 from app.strategies.price_gap.settings import FeedSettingsService, InvalidSetting
 
 APP_NAME = "terminal-ludik"
@@ -47,6 +49,12 @@ class HistoryQueries(Protocol):
     async def episodes(self, limit: int) -> list[dict[str, Any]]: ...
 
     async def storage(self) -> dict[str, Any]: ...
+
+    async def trades(self, flt: TradeFilter, limit: int) -> list[dict[str, Any]]: ...
+
+    async def trades_csv(self, flt: TradeFilter) -> str: ...
+
+    async def trade_stats(self, flt: TradeFilter) -> dict[str, Any]: ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -189,6 +197,38 @@ def create_app(server: ServerSettings, web_dist: Path, context: ApiContext) -> F
     @app.get("/api/history/storage", dependencies=[Depends(require_token)])
     async def history_storage() -> dict[str, Any]:
         return await database_call(history().storage())
+
+    def trade_filter(from_ms: int | None, to_ms: int | None, token: str | None, long: str | None, short: str | None) -> TradeFilter:
+        now = datetime.now(UTC)
+        since = datetime.fromtimestamp(from_ms / 1000, UTC) if from_ms else datetime(2000, 1, 1, tzinfo=UTC)
+        until = datetime.fromtimestamp(to_ms / 1000, UTC) if to_ms else now + timedelta(days=1)
+        return TradeFilter(since, until, (token or "").upper() or None, long or None, short or None)
+
+    @app.get("/api/trades", dependencies=[Depends(require_token)])
+    async def list_trades(
+        from_ms: int | None = None,
+        to_ms: int | None = None,
+        token: str | None = Query(default=None, max_length=40),
+        long: str | None = Query(default=None, max_length=20),
+        short: str | None = Query(default=None, max_length=20),
+        limit: int = Query(default=500, ge=1, le=5000),
+    ) -> dict[str, Any]:
+        return {"trades": await database_call(history().trades(trade_filter(from_ms, to_ms, token, long, short), limit))}
+
+    @app.get("/api/trades.csv", dependencies=[Depends(require_token)])
+    async def export_trades(
+        from_ms: int | None = None,
+        to_ms: int | None = None,
+        token: str | None = Query(default=None, max_length=40),
+        long: str | None = Query(default=None, max_length=20),
+        short: str | None = Query(default=None, max_length=20),
+    ) -> PlainTextResponse:
+        text = await database_call(history().trades_csv(trade_filter(from_ms, to_ms, token, long, short)))
+        return PlainTextResponse(text, media_type="text/csv; charset=utf-8", headers={"Content-Disposition": 'attachment; filename="ludik-trades.csv"'})
+
+    @app.get("/api/trades/stats", dependencies=[Depends(require_token)])
+    async def trade_statistics(from_ms: int | None = None, to_ms: int | None = None) -> dict[str, Any]:
+        return await database_call(history().trade_stats(trade_filter(from_ms, to_ms, None, None, None)))
 
     def portfolio() -> PortfolioService:
         if context.portfolio is None:

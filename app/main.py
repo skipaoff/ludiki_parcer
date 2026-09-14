@@ -40,6 +40,7 @@ from app.market.private_streams import OrderEvents, PrivateStreams
 from app.portfolio.service import PortfolioService
 from app.system.keep_awake import KeepAwake
 from app.storage import history as history_queries
+from app.storage import trades_history
 from app.strategies.price_gap.engine import PriceGapEngine
 from app.strategies.price_gap.recorder import EpisodeRecorder
 from app.strategies.price_gap.settings import FeedSettingsService
@@ -194,6 +195,15 @@ async def _serve(
 
         async def storage(self) -> dict[str, Any]:
             return await history_queries.storage_usage(database.pool)
+
+        async def trades(self, flt: Any, limit: int) -> list[dict[str, Any]]:
+            return await trades_history.trades(database.pool, flt, limit)
+
+        async def trades_csv(self, flt: Any) -> str:
+            return await trades_history.trades_csv(database.pool, flt)
+
+        async def trade_stats(self, flt: Any) -> dict[str, Any]:
+            return await trades_history.trade_stats(database.pool, flt)
 
     def snapshot() -> dict[str, Any]:
         return {

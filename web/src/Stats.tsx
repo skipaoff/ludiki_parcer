@@ -1,5 +1,5 @@
-// VFP: The Statistics screen, stage 4 edition — what recorded history already says about gaps: funnel, lifetimes, peaks, missed profit, storage growth.
-// Changes when: recorded history gains new summaries; the full statistics screen of stage 7 replaces the preview parts.
+// VFP: The Statistics screen — trading results and execution quality, then what recorded history says about gaps: funnel, lifetimes, peaks, missed profit, storage growth.
+// Changes when: a statistic is added or its presentation changes (PLAN.md, section 3.3).
 // Anti-goal:
 // 1. Computing statistics in the browser — the database aggregates, the screen shows.
 
@@ -49,6 +49,132 @@ interface Storage {
   hypertables: Record<string, { bytes: number; rows_24h: number }>;
 }
 
+interface TradeStats {
+  totals: { trades: number; wins: number; failed: number; win_rate: number | null; pnl_net_usd: string; fees_usd: string; funding_usd: string; avg_pnl_pct: string | null; avg_duration_s: string | null };
+  periods: { today: string; week: string; month: string };
+  slippage: { long_exchange: string; short_exchange: string; trades: number; avg_slippage_pct: string | null; median_slippage_pct: number | null; avg_expected_pct: string | null; avg_actual_pct: string | null }[];
+  latency: { exchange: string; orders: number; avg_ms: string | null; median_ms: number | null; p90_ms: number | null }[];
+  by_day: { day: number; trades: number; pnl_net_usd: string | null }[];
+  by_token: { token: string; trades: number; pnl_net_usd: string | null; avg_pnl_pct: string | null }[];
+  by_pair: { long_exchange: string; short_exchange: string; trades: number; pnl_net_usd: string | null }[];
+  by_hour: { hour: number; trades: number; pnl_net_usd: string | null }[];
+  funnel: { bucket: number; gaps: number; opened: number }[];
+}
+
+function usd(value: string | null | undefined): string {
+  if (value == null) return "—";
+  const number = Number(value);
+  return `${number > 0 ? "+" : number < 0 ? "−" : ""}$${Math.abs(number).toFixed(2)}`;
+}
+
+function TradingStats({ stats }: { stats: TradeStats }) {
+  const totals = stats.totals;
+  return (
+    <>
+      <section>
+        <h2>Результат</h2>
+        <div className="row"><span>PnL сегодня / 7 дней / 30 дней</span><span className="strong">{usd(stats.periods.today)} / {usd(stats.periods.week)} / {usd(stats.periods.month)}</span></div>
+        <div className="row">
+          <span>за выбранный период: сделок · прибыльных · сбоев ноги</span>
+          <span>{totals.trades} · {totals.wins} ({totals.win_rate === null ? "—" : `${Math.round(totals.win_rate * 100)}%`}) · {totals.failed}</span>
+        </div>
+        <div className="row"><span>PnL · средний на сделку · комиссии · фандинг</span><span>{usd(totals.pnl_net_usd)} · {pct(totals.avg_pnl_pct)} · ${Number(totals.fees_usd).toFixed(2)} · {usd(totals.funding_usd)}</span></div>
+        <div className="row"><span>средняя длительность сделки</span><span>{duration(totals.avg_duration_s === null ? null : Number(totals.avg_duration_s))}</span></div>
+      </section>
+      <section>
+        <h2>Качество исполнения</h2>
+        {stats.slippage.length === 0 && stats.latency.length === 0 ? (
+          <p className="muted">Появится после первых сделок терминала.</p>
+        ) : (
+          <>
+            <table className="grid feed-table">
+              <thead><tr><th className="left">ЛОНГ → ШОРТ</th><th>СДЕЛОК</th><th>ROI ОЖИД.</th><th>ROI ФАКТ</th><th>ПРОСКАЛЬЗ. СР.</th><th>МЕДИАНА</th></tr></thead>
+              <tbody>
+                {stats.slippage.map((row) => (
+                  <tr key={`${row.long_exchange}${row.short_exchange}`}>
+                    <td className="left">{row.long_exchange.toUpperCase()} → {row.short_exchange.toUpperCase()}</td>
+                    <td>{row.trades}</td>
+                    <td>{pct(row.avg_expected_pct)}</td>
+                    <td>{pct(row.avg_actual_pct)}</td>
+                    <td>{pct(row.avg_slippage_pct, 3)}</td>
+                    <td>{pct(row.median_slippage_pct === null ? null : String(row.median_slippage_pct), 3)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            <table className="grid feed-table">
+              <thead><tr><th className="left">БИРЖА</th><th>ОРДЕРОВ</th><th>КЛИК → ИСПОЛНЕНИЕ СР.</th><th>МЕДИАНА</th><th>90%</th></tr></thead>
+              <tbody>
+                {stats.latency.map((row) => (
+                  <tr key={row.exchange}>
+                    <td className="left">{row.exchange.toUpperCase()}</td>
+                    <td>{row.orders}</td>
+                    <td>{row.avg_ms === null ? "—" : `${Math.round(Number(row.avg_ms))}мс`}</td>
+                    <td>{row.median_ms === null ? "—" : `${Math.round(row.median_ms)}мс`}</td>
+                    <td>{row.p90_ms === null ? "—" : `${Math.round(row.p90_ms)}мс`}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </>
+        )}
+      </section>
+      {(stats.by_day.length > 0 || stats.by_token.length > 0) && (
+        <section>
+          <h2>PnL по дням, монетам, парам бирж и часам</h2>
+          <div className="stats-columns">
+            <table className="grid feed-table">
+              <thead><tr><th className="left">ДЕНЬ</th><th>СДЕЛОК</th><th>PnL</th></tr></thead>
+              <tbody>
+                {stats.by_day.map((row) => (
+                  <tr key={row.day}><td className="left">{new Date(row.day).toLocaleDateString("ru-RU")}</td><td>{row.trades}</td><td>{usd(row.pnl_net_usd)}</td></tr>
+                ))}
+              </tbody>
+            </table>
+            <table className="grid feed-table">
+              <thead><tr><th className="left">МОНЕТА</th><th>СДЕЛОК</th><th>PnL</th><th>СР. %</th></tr></thead>
+              <tbody>
+                {stats.by_token.map((row) => (
+                  <tr key={row.token}><td className="left">{row.token}</td><td>{row.trades}</td><td>{usd(row.pnl_net_usd)}</td><td>{pct(row.avg_pnl_pct)}</td></tr>
+                ))}
+              </tbody>
+            </table>
+            <table className="grid feed-table">
+              <thead><tr><th className="left">ПАРА БИРЖ</th><th>СДЕЛОК</th><th>PnL</th></tr></thead>
+              <tbody>
+                {stats.by_pair.map((row) => (
+                  <tr key={`${row.long_exchange}${row.short_exchange}`}><td className="left">{row.long_exchange.toUpperCase()} → {row.short_exchange.toUpperCase()}</td><td>{row.trades}</td><td>{usd(row.pnl_net_usd)}</td></tr>
+                ))}
+              </tbody>
+            </table>
+            <table className="grid feed-table">
+              <thead><tr><th className="left">ЧАС ОТКРЫТИЯ</th><th>СДЕЛОК</th><th>PnL</th></tr></thead>
+              <tbody>
+                {stats.by_hour.map((row) => (
+                  <tr key={row.hour}><td className="left">{String(row.hour).padStart(2, "0")}:00</td><td>{row.trades}</td><td>{usd(row.pnl_net_usd)}</td></tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      )}
+      {stats.funnel.length > 0 && (
+        <section>
+          <h2>Какие вилки открывались</h2>
+          <table className="grid feed-table">
+            <thead><tr><th className="left">ПИК ROI</th><th>ВИЛОК В ЛЕНТЕ</th><th>ОТКРЫТО</th><th>ДОЛЯ</th></tr></thead>
+            <tbody>
+              {stats.funnel.map((row) => (
+                <tr key={row.bucket}><td className="left">{BUCKETS[row.bucket] ?? row.bucket}</td><td>{row.gaps}</td><td>{row.opened}</td><td>{row.gaps ? `${Math.round((row.opened / row.gaps) * 100)}%` : "—"}</td></tr>
+              ))}
+            </tbody>
+          </table>
+        </section>
+      )}
+    </>
+  );
+}
+
 const BUCKETS = ["< 0.5%", "0.5–1%", "1–2%", "2–5%", "≥ 5%"];
 const END_REASON: Record<string, string> = {
   converged: "сошлась",
@@ -79,6 +205,7 @@ export function StatsScreen({ token, recordedLive }: { token: string; recordedLi
   const [summary, setSummary] = useState<Summary | null>(null);
   const [episodes, setEpisodes] = useState<Episode[]>([]);
   const [storage, setStorage] = useState<Storage | null>(null);
+  const [trades, setTrades] = useState<TradeStats | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(() => {
@@ -86,11 +213,13 @@ export function StatsScreen({ token, recordedLive }: { token: string; recordedLi
       apiGet<Summary>(`/api/history/summary?hours=${hours}`, token),
       apiGet<{ episodes: Episode[] }>("/api/history/episodes?limit=100", token),
       apiGet<Storage>("/api/history/storage", token),
+      apiGet<TradeStats>(`/api/trades/stats?from_ms=${Date.now() - hours * 3_600_000}`, token),
     ])
-      .then(([nextSummary, nextEpisodes, nextStorage]) => {
+      .then(([nextSummary, nextEpisodes, nextStorage, nextTrades]) => {
         setSummary(nextSummary);
         setEpisodes(nextEpisodes.episodes);
         setStorage(nextStorage);
+        setTrades(nextTrades);
         setError(null);
       })
       .catch((reason: Error) => setError(reason.message));
@@ -113,6 +242,7 @@ export function StatsScreen({ token, recordedLive }: { token: string; recordedLi
         ))}
       </div>
       {error && <p className="level-warning">{error}</p>}
+      {trades && <TradingStats stats={trades} />}
       {summary && (
         <>
           <section>

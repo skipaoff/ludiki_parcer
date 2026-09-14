@@ -333,6 +333,25 @@ a:hover {
   }
 }
 
+select {
+  font: inherit;
+  color: var(--fg);
+  background: var(--bg);
+  border: 1px solid var(--line);
+  padding: 0.25rem 0.4rem;
+}
+
+.stats-columns {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(18rem, 1fr));
+  gap: 1.5rem;
+  align-items: start;
+}
+
+.stats .grid {
+  margin: 0.5rem 0 1rem;
+}
+
 .section-title {
   margin-top: 1rem;
   border-top: 1px solid var(--line);
