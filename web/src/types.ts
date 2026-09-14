@@ -25,6 +25,7 @@ export interface ExchangeState {
   clock_offset_ms: number | null;
   clock_warning: boolean;
   keys: KeysState;
+  read_only?: boolean;
 }
 
 export interface AccountFacts {
@@ -63,6 +64,7 @@ export interface ExchangeDetails {
   key_masked: string | null;
   keys: KeysState;
   check: CheckResult | null;
+  read_only?: boolean;
 }
 
 export interface InstrumentsSummary {
@@ -151,7 +153,7 @@ export interface FeedView {
   radar: FeedRow[];
   settings?: { size_usd: string; min_roi_pct: string; fresh_ms: number; taker_fee_pct: Record<string, string> };
   stats: Record<string, number>;
-  streams?: Record<string, Record<string, number>>;
+  streams?: Record<string, Partial<Record<"connections" | "sockets" | "depth_symbols" | "polls" | "poll_errors" | "listings" | "reconnects", number>>>;
 }
 
 export interface TradeCard {

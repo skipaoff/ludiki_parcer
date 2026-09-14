@@ -17,7 +17,7 @@ from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any, Awaitable, Callable
 
-from app.config.settings import TradingSettings
+from app.config.settings import READ_ONLY_EXCHANGES, TradingSettings
 from app.core.actions import CloseLeg, MarkLegLost, MarkTradeClosed, MarkTradeFailed, MarkTradeOpen, QueryOrderStatus, RaiseAlert, ReduceLeg
 from app.core.legs import CloseResult, LegResult, OrderOutcome, decide_close, decide_open
 from app.core.portfolio import entry_spread_pct, estimated_entry_fees_usd, settle, weighted_price
@@ -157,7 +157,7 @@ class ExecutionService:
     # ── facts ────────────────────────────────────────────────────────────────
 
     def _leverage(self, exchange: str) -> int:
-        return self._settings.leverage_binance if exchange == "binance" else self._settings.leverage_mexc
+        return self._settings.leverage(exchange)
 
     def _keys_accepted(self, exchange: str) -> bool:
         try:
@@ -190,6 +190,10 @@ class ExecutionService:
             return ["no_quote"]
         record, quote, _ = found
         long, short = quote.long, quote.short
+        read_only = [leg.exchange for leg in (long, short) if leg.exchange in READ_ONLY_EXCHANGES]
+        if read_only:
+            # No other check matters: a pair with a venue that cannot take orders is information, not a trade.
+            return [f"exchange_read_only:{name}" for name in read_only]
         fresh = quote.problem != "stale" and self._clock_ms() - quote.ts_ms <= self._engine.quote_max_age_ms
         qty_problem = quote.problem if quote.problem not in (None, "stale") else None
         facts = OpenFacts(
@@ -650,13 +654,13 @@ class ExecutionService:
     # ── views ────────────────────────────────────────────────────────────────
 
     def _snapshot(self) -> dict[str, Any]:
+        tradable = [name for name in self._exchanges.names if name not in READ_ONLY_EXCHANGES]
         return {
             "size_usd": str(self._size_usd()),
-            "leverage_binance": self._settings.leverage_binance,
-            "leverage_mexc": self._settings.leverage_mexc,
+            "leverage": {name: self._leverage(name) for name in tradable},
             "isolated": self._settings.isolated,
             "entry_min_roi_pct": str(self._settings.entry_min_roi_pct),
-            "taker_fee_pct": {"binance": str(self._taker_fee_pct("binance")), "mexc": str(self._taker_fee_pct("mexc"))},
+            "taker_fee_pct": {name: str(self._taker_fee_pct(name)) for name in tradable},
         }
 
     def annotate(self, rows: list[dict[str, Any]]) -> list[dict[str, Any]]:

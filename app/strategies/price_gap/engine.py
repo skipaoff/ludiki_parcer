@@ -4,8 +4,9 @@ Changes when: how gaps are found, measured or presented changes (PLAN.md, sectio
 Anti-goal:
 1. ROI from best prices in the feed — only book-based ROI on the configured size is shown as ROI.
 2. Stale data extending a gap — a leg older than the freshness limit counts as no measurement.
-3. Trading decisions or orders — the feed is read-only until stage 6.
+3. Trading decisions or orders — the engine measures; execution acts.
 4. Awaiting anything inside a tick — the tick is plain computation over memory.
+5. Knowing which exchanges exist — pairs and feeds arrive from the catalog and the composition root.
 """
 
 from __future__ import annotations
@@ -15,13 +16,13 @@ import logging
 import time
 from dataclasses import dataclass
 from decimal import Decimal
-from typing import Any, Callable, Protocol
+from typing import Any, Callable, Mapping, Protocol
 
 from app.config.settings import FeedSettings
 from app.core.episodes import EpisodeRules, EpisodeState, EventKind, Phase, Sample, end, step
 from app.core.links import trade_url
 from app.core.qty import QtyRejected, plan_quantity
-from app.core.radar import TopRoi, best_price_roi, choose_books, leg_fresh
+from app.core.radar import TopCheck, TopRoi, best_price_roi, choose_books, leg_fresh
 from app.core.roi import best_entry, capacity_tokens, exit_quote
 from app.core.schemas import Fees, Instrument
 from app.instruments.service import PairRecord
@@ -45,8 +46,6 @@ class DepthFeed(Protocol):
     def set_depth(self, symbols: Any) -> None: ...
 
     def resubscribe_depth(self, symbol: str) -> None: ...
-
-    def stream_age_ms(self, symbol: str) -> float | None: ...
 
 
 @dataclass
@@ -84,28 +83,44 @@ def _ms(value: float | None) -> int | None:
     return None if value is None else int(value)
 
 
+def _worth_watching(record: PairRecord) -> bool:
+    """
+    Blacklisted pairs, and pairs whose per-token prices differ by more than the mismatch limit (a different asset under
+    the same ticker, or other price units), would only fill the radar with fake gaps of hundreds of percent. A manual
+    "verified" mark brings a pair back.
+    """
+    if record.blacklisted:
+        return False
+    return record.manually_verified or record.assessment.suspicious_reason != "price_mismatch"
+
+
 class PriceGapEngine:
     def __init__(
         self,
         catalog: Catalog,
         state: MarketState,
-        binance: DepthFeed,
-        mexc: DepthFeed,
+        feeds: Mapping[str, DepthFeed],
         settings: FeedSettings,
         taker_fee_pct: Callable[[str], Decimal],
-        on_radar_symbols: Callable[[list[str]], None],
+        on_catalog: Callable[[list[Instrument]], None],
         clock_ms: Callable[[], float] = lambda: time.time() * 1000,
         sink: EpisodeSink | None = None,
         pinned: Callable[[], list[str]] = lambda: [],
+        fresh_ms_overrides: Mapping[str, int] | None = None,
     ) -> None:
+        """
+        feeds maps an exchange name to its order-book subscriptions; on_catalog receives every catalog contract;
+        fresh_ms_overrides gives venues with slower quotes their own freshness limit (their quotes need no confirmation).
+        """
+        self._fresh_overrides = dict(fresh_ms_overrides or {})
         self._sink: EpisodeSink = sink or NullSink()
         self._pinned = pinned
         self._catalog = catalog
         self._state = state
-        self._feeds = {"binance": binance, "mexc": mexc}
+        self._feeds = dict(feeds)
         self._settings = settings
         self._taker_fee_pct = taker_fee_pct
-        self._on_radar_symbols = on_radar_symbols
+        self._on_catalog = on_catalog
         self._clock_ms = clock_ms
         self._rules = EpisodeRules(
             min_roi_net_pct=settings.min_roi_pct,
@@ -169,22 +184,29 @@ class PriceGapEngine:
             return
         self._catalog_keys = keys
         self._records = {record.key: record for record in records}
-        instruments = [leg for record in records for leg in (record.assessment.a, record.assessment.b)]
+        unique = {(leg.exchange, leg.symbol_raw): leg for record in records for leg in (record.assessment.a, record.assessment.b)}
+        instruments = list(unique.values())
         self._state.set_instruments(instruments)
-        self._on_radar_symbols([record.assessment.a.symbol_raw for record in records if record.assessment.a.exchange == "binance"])
+        self._on_catalog(instruments)
 
     def _fees(self, long: Instrument, short: Instrument) -> Fees:
         return Fees(taker_long_pct=self._taker_fee_pct(long.exchange), taker_short_pct=self._taker_fee_pct(short.exchange))
 
+    def _top_limit_ms(self, exchange: str) -> int:
+        override = self._fresh_overrides.get(exchange)
+        return TOP_STALE_MS if override is None else min(TOP_STALE_MS, override)
+
     def _radar(self, now: float) -> list[TopRoi]:
         tops = []
         for key, record in self._records.items():
+            if not _worth_watching(record):
+                continue
             a, b = record.assessment.a, record.assessment.b
             top_a = self._state.tops.get((a.exchange, a.symbol_raw))
             top_b = self._state.tops.get((b.exchange, b.symbol_raw))
             if top_a is None or top_b is None:
                 continue
-            if now - top_a.received_ms > TOP_STALE_MS or now - top_b.received_ms > TOP_STALE_MS:
+            if now - top_a.received_ms > self._top_limit_ms(a.exchange) or now - top_b.received_ms > self._top_limit_ms(b.exchange):
                 continue
             round_trip = float(self._fees(a, b).round_trip_pct)
             roi = best_price_roi(key, a.exchange, top_a.bid, top_a.ask, b.exchange, top_b.bid, top_b.ask, round_trip)
@@ -203,8 +225,10 @@ class PriceGapEngine:
         # Open pairs come first: their exit spread and PnL depend on these books.
         watched = [key for key in self._pinned() if key in self._records] + in_feed + tracking
         threshold = float(self._settings.min_roi_pct - self._settings.candidate_margin_pct)
-        candidates = [top.key for top in self._tops if top.roi_net_pct >= threshold]
-        radar = [top.key for top in self._tops[: self._settings.radar_rows]]
+        # Tradable pairs get order books first; pairs flagged suspicious only take slots that are left over.
+        ranked = sorted(self._tops, key=lambda top: not self._records[top.key].tradable)
+        candidates = [top.key for top in ranked if top.roi_net_pct >= threshold]
+        radar = [top.key for top in ranked[: self._settings.radar_rows]]
         chosen = choose_books(
             watched,
             candidates + radar,
@@ -243,9 +267,21 @@ class PriceGapEngine:
 
         subscribed_since = self._books[record.key]
         fresh = {}
-        for leg_key, age in ((key_a, age_a), (key_b, age_b)):
+        for leg_key, age, book in ((key_a, age_a, book_a), (key_b, age_b, book_b)):
             feed = self._feeds[leg_key[0]]
-            fresh[leg_key] = leg_fresh(age, feed.stream_age_ms(leg_key[1]), self._settings.fresh_ms, self._settings.quiet_book_max_ms)
+            override = self._fresh_overrides.get(leg_key[0])
+            if override is not None:
+                fresh[leg_key] = age is not None and age <= override
+                continue
+            top = self._state.tops.get(leg_key)
+            fresh[leg_key] = leg_fresh(
+                age,
+                float(book.bids[0].price) if book and book.bids else None,
+                float(book.asks[0].price) if book and book.asks else None,
+                TopCheck(top.bid, top.ask) if top else None,
+                self._settings.fresh_ms,
+                self._settings.quiet_book_max_ms,
+            )
             lost = (age is None and now - subscribed_since > self._settings.resubscribe_after_ms) or (
                 age is not None and age > self._settings.quiet_book_max_ms
             )
@@ -430,10 +466,7 @@ class PriceGapEngine:
                 "size_usd": _text(self._settings.size_usd),
                 "min_roi_pct": _text(self._settings.min_roi_pct),
                 "fresh_ms": self._settings.fresh_ms,
-                "taker_fee_pct": {
-                    "binance": _text(self._taker_fee_pct("binance")),
-                    "mexc": _text(self._taker_fee_pct("mexc")),
-                },
+                "taker_fee_pct": {exchange: _text(self._taker_fee_pct(exchange)) for exchange in self._feeds},
             },
             "stats": {
                 "pairs": len(self._records),

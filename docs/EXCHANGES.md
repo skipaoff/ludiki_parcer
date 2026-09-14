@@ -168,7 +168,53 @@
 
 ---
 
-## Остальные биржи (после MVP)
+## Gate USDT Futures (подключена 14.09.2026)
+
+**Библиотека:** в ccxt биржа называется `gate`, рынок `swap`, методы `public_futures_*` и `private_futures_*` с параметром `settle=usdt`.
+
+### Публичная часть [проверено 14.09.2026]
+
+| Эндпоинт | Что берём |
+|---|---|
+| `GET /api/v4/futures/usdt/contracts` | 981 контракт. `name` (`BTC_USDT`), `quanto_multiplier` — **токенов в одном контракте** (BTC 0,0001, PEPE 10 000 000), `order_size_min`/`order_size_max`/`market_order_size_max` в контрактах, `order_price_round`, `status` (`trading`), `in_delisting`, `is_pre_market`, `type` (`direct`), `enable_decimal`, `taker_fee_rate` (0,00075). Контракты с дробным размером терминал торгует целыми контрактами |
+| `GET /api/v4/futures/usdt/tickers` | `highest_bid`, `lowest_ask`, `mark_price`, `index_price`, `volume_24h_quote` (оборот в USDT). Терминал опрашивает раз в секунду — это радар Gate |
+| `GET /api/v4/spot/time` | `server_time` в мс — пинг и часы |
+| `wss://fx-ws.gateio.ws/v4/ws/usdt`, `futures.order_book` с `["BTC_USDT", "20", "0"]` | событие `all` — **полный снимок** 20 уровней около 9 раз в секунду; уровень `{"p": цена, "s": размер в контрактах}`. Подписка: `{"time", "channel", "event": "subscribe", "payload"}`, пинг `futures.ping` |
+| то же, `futures.book_ticker` | `b`, `B`, `a`, `A`, `t` в реальном времени (терминал пока не использует) |
+
+Цены на Gate — за токен, множителей в тикерах не встретилось. У некоторых тикеров Gate другой актив, чем у одноимённых на Binance и MEXC (CAT, EDGE, HK50): терминал видит расхождение цены за токен больше 20% и убирает такие пары из радара, пока их не отметят «проверено».
+
+### Приватная часть [док, проверить пробной сделкой]
+
+| Эндпоинт | Что делаем |
+|---|---|
+| `GET /futures/usdt/accounts` | `total`, `unrealised_pnl`, `available`, `position_margin`, `order_margin`, `in_dual_mode` (one-way = `false`) |
+| `GET /futures/usdt/fee?contract=` | `taker_fee`, `maker_fee` долями |
+| `GET /api/v4/account/detail` | `ip_whitelist`. Права ключа на вывод Gate не сообщает — предупреждение |
+| `GET /futures/usdt/positions` | `size` в контрактах со знаком, `entry_price`, `mark_price`, `liq_price`, `leverage` (0 = кросс) |
+| `POST /futures/usdt/positions/{contract}/leverage` | `leverage` для изолированной, `leverage=0` + `cross_leverage_limit` для кросса |
+| `POST /futures/usdt/orders` | `size` со знаком (плюс покупка), `price="0"` + `tif="ioc"` — рыночный, `text="t-<свой id>"`, `reduce_only` |
+| `GET /futures/usdt/orders/{t-свой id}` | **по своему id ордер находится только 60 секунд после исполнения**; позже адаптер ищет его среди последних 100 ордеров контракта, и только потом считает, что ордера не было |
+| `GET /futures/usdt/my_trades?order=` | исполнения, `fee` в USDT |
+| `GET /futures/usdt/account_book?type=fund` | фандинг, `change` со знаком |
+
+Приватный вебсокет Gate терминал пока не использует: подтверждение идёт запросом статуса и опросом позиций.
+
+---
+
+## Variational Omni (подключён только на чтение 14.09.2026)
+
+- **Торгового API нет** [док 14.09.2026]: «The trading API is still in development, and is not yet available to any users». Пары с Variational видны в каталоге и на экране «Пары», открыть их нельзя.
+- **Единственный эндпоинт** `GET https://omni-client-api.prod.ap-northeast-1.variational.io/metadata/stats`: 553 рынка, ~280 КБ. Лимит 10 запросов за 10 секунд с одного IP — терминал делает один общий запрос раз в 2 секунды.
+- **Поля:** `ticker` (голое имя, `1000PEPE` — цена за 1000 PEPE), `mark_price`, `volume_24h`, `funding_rate`, `quotes.base` (лучшие цены), `quotes.size_1k` и `quotes.size_100k` (средняя цена сделки на $1 тыс. и $100 тыс.), у крупных `size_1m`, `quotes.updated_at` с наносекундами. Индекса нет — с другими биржами сравнивается `mark_price` против их индекса.
+- **Стакана нет:** терминал строит из двух котировок стакан из двух уровней, проход по которому даёт ровно среднюю цену Variational на $1 тыс. и на $100 тыс.; больше $100 тыс. — «глубины не хватает».
+- **Котировки из кэша [проверено 14.09.2026]:** возраст по `updated_at` 41–105 с, медиана около минуты; три запроса с интервалом 3 с вернули один и тот же снимок. Документация: «The bid/ask price may be cached for up to 600 seconds». Минутные цены против живых стаканов дают ложные вилки, поэтому при пороге свежести 30 с (`[exchanges.variational] max_quote_age_ms`) пары с Variational в ленту и историю не попадают.
+- **Комиссий нет** [док]: «There are no trading fees on Omni», заработок — в спреде котировок.
+- **User-Agent:** Cloudflare перед API отвечает 403 на `Python-urllib`; aiohttp проходит, адаптер представляется `terminal-ludik/0.1`.
+
+---
+
+## Остальные биржи
 
 Публичные эндпоинты тикеров, которые работали в парсере [прод]. Для терминала у каждой биржи дополнительно нужны bid/ask, стакан и приватная часть.
 
@@ -176,11 +222,9 @@
 |---|---|---|---|---|---|
 | Bybit | `bybit` | `GET https://api.bybit.com/v5/market/tickers?category=linear` | `lastPrice` | `turnover24h` | |
 | OKX | `okx` | `GET https://www.okx.com/api/v5/market/tickers?instType=SWAP` | `last` | `volCcy24h` | у SWAP `volCcy24h`, похоже, в базовой монете, а не в $ — парсер считал его долларами [проверить]. Торгуется контрактами |
-| Gate | `gate` | `GET https://api.gateio.ws/api/v4/futures/usdt/tickers` | `last` | `volume_24h_settle` | торгуется контрактами |
 | Bitget | `bitget` | `GET https://api.bitget.com/api/v2/mix/market/tickers?productType=USDT-FUTURES` | `lastPr` | `quoteVolume` | |
 | BingX | `bingx` | `GET https://open-api.bingx.com/openApi/swap/v2/quote/ticker` | `lastPrice` | `quoteVolume` | |
 | Phemex | `phemex` | `GET https://api.phemex.com/md/v3/ticker/24hr/all?type=Perpetual` | `lastRp` | `turnoverRp` (в парсере делится на 1e8) | масштаб поля [проверить] |
 | Hyperliquid | `hyperliquid` | `POST https://api.hyperliquid.xyz/info` `{"type":"metaAndAssetCtxs"}` | `midPx` | `dayNtlVlm` | префикс `k` = ×1000. Торговля через API-кошелёк без права вывода, а не API-ключ |
 | Aster | `aster` | `GET https://fapi.asterdex.com/fapi/v1/ticker/24hr` | `lastPrice` | `quoteVolume` | формат API как у Binance |
 | KuCoin Futures | `kucoinfutures` | (в парсере только фандинг) `GET https://api-futures.kucoin.com/api/v1/contracts/active` | — | — | `XBT` = BTC, суффикс `USDTM` |
-| Variational | нет | `GET https://omni-client-api.prod.ap-northeast-1.variational.io/metadata/stats` | `mark_price` | — | торгового API в ccxt нет. Для терминала не подходит |

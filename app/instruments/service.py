@@ -1,8 +1,8 @@
 """
-VFP: Keeps the current list of Binance–MEXC pairs with their units, steps, suspicion and manual flags, refreshed from public data.
-Changes when: pairs gain new attributes, another exchange joins, or the refresh policy changes.
+VFP: Keeps the current list of cross-exchange pairs (every two enabled exchanges) with their units, steps, suspicion and manual flags, refreshed from public data.
+Changes when: pairs gain new attributes or the refresh policy changes.
 Anti-goal:
-1. A half-refreshed catalog — if either exchange fails to load, the previous catalog stays in place.
+1. Pairs vanishing because one exchange failed to answer — its last good load stands in until it recovers.
 2. Suspicious or blacklisted pairs looking tradable — tradable() is the single answer every consumer uses.
 3. Needing API keys — everything here comes from public endpoints.
 """
@@ -18,15 +18,14 @@ from typing import Any, Callable
 
 from app.config.settings import InstrumentsSettings
 from app.core.links import trade_url
-from app.core.pairs import PairAssessment, assess_pair, match_instruments
+from app.core.pairs import PairAssessment, Quote, assess_pair, match_all
 from app.core.schemas import Instrument
 from app.journal.journal import Journal, Level
 from app.storage.catalog import StoredPair, pair_key, save_catalog, set_pair_flags
 
 log = logging.getLogger(__name__)
 
-EXCHANGE_A = "binance"
-EXCHANGE_B = "mexc"
+RETRY_AFTER_FAILURE_S = 30
 
 
 class UnknownPair(KeyError):
@@ -73,13 +72,19 @@ def _leg(instrument: Instrument, price_per_token: Decimal | None) -> dict[str, A
 class InstrumentService:
     def __init__(
         self,
+        exchanges: list[str],
         adapters: Callable[[str], Any],
         database: Any,
         journal: Journal,
         settings: InstrumentsSettings,
         clock: Callable[[], float] = time.time,
     ) -> None:
-        """adapters(name) returns the current adapter of an exchange; database is app.storage.database.Database."""
+        """
+        exchanges — enabled exchange names in a fixed order (the earlier one is leg a of a pair);
+        adapters(name) returns the current adapter of an exchange; database is app.storage.database.Database.
+        """
+        self._exchanges = list(exchanges)
+        self._last_good: dict[str, tuple[list[Instrument], dict[str, Quote]]] = {}
         self._adapters = adapters
         self._database = database
         self._journal = journal
@@ -97,7 +102,9 @@ class InstrumentService:
                 await self.refresh()
             except Exception:
                 log.exception("instrument refresh failed")
-            await asyncio.sleep(self._settings.refresh_interval_s)
+            # An exchange that failed (a startup timeout is common) is retried soon instead of an hour later.
+            missing = any(name not in self._last_good for name in self._exchanges) or self._last_error is not None
+            await asyncio.sleep(RETRY_AFTER_FAILURE_S if missing else self._settings.refresh_interval_s)
 
     async def refresh(self) -> dict[str, Any]:
         async with self._lock:
@@ -107,36 +114,49 @@ class InstrumentService:
             finally:
                 self._refreshing = False
 
+    async def _load(self, name: str) -> tuple[list[Instrument], dict[str, Quote]]:
+        adapter = self._adapters(name)
+        instruments, quotes = await asyncio.gather(adapter.load_instruments(), adapter.fetch_quotes())
+        return instruments, quotes
+
     async def _refresh(self) -> dict[str, Any]:
-        adapter_a, adapter_b = self._adapters(EXCHANGE_A), self._adapters(EXCHANGE_B)
-        try:
-            instruments_a, instruments_b, quotes_a, quotes_b = await asyncio.gather(
-                adapter_a.load_instruments(),
-                adapter_b.load_instruments(),
-                adapter_a.fetch_quotes(),
-                adapter_b.fetch_quotes(),
-            )
-        except Exception as exc:
-            self._last_error = f"{type(exc).__name__}: {exc}"[:300]
-            self._journal.emit(Level.WARNING, "instruments", "refresh_failed", error=self._last_error)
+        results = await asyncio.gather(*(self._load(name) for name in self._exchanges), return_exceptions=True)
+        loaded: dict[str, tuple[list[Instrument], dict[str, Quote]]] = {}
+        failures = {}
+        for name, result in zip(self._exchanges, results):
+            if isinstance(result, BaseException):
+                failures[name] = f"{type(result).__name__}: {result}"[:300]
+                # One exchange failing must not drop its pairs: the last good load stands in until it recovers.
+                if name in self._last_good:
+                    loaded[name] = self._last_good[name]
+                continue
+            loaded[name] = result
+            self._last_good[name] = result
+        if failures:
+            self._last_error = "; ".join(f"{name}: {error}" for name, error in failures.items())[:300]
+            self._journal.emit(Level.WARNING, "instruments", "refresh_failed", error=self._last_error, exchanges=sorted(failures))
+        if len(loaded) < 2:
             return self.summary()
 
+        by_exchange = {name: instruments for name, (instruments, _) in loaded.items()}
+        quotes = {(name, symbol): quote for name, (_, exchange_quotes) in loaded.items() for symbol, quote in exchange_quotes.items()}
         assessments = [
             assess_pair(
                 a,
                 b,
-                quotes_a.get(a.symbol_raw),
-                quotes_b.get(b.symbol_raw),
+                quotes.get((a.exchange, a.symbol_raw)),
+                quotes.get((b.exchange, b.symbol_raw)),
                 self._settings.max_price_gap_pct,
                 self._settings.max_index_gap_pct,
             )
-            for a, b in match_instruments(instruments_a, instruments_b)
+            for a, b in match_all(by_exchange, self._exchanges)
         ]
+        all_instruments = [instrument for instruments in by_exchange.values() for instrument in instruments]
 
         stored: dict[str, StoredPair] = {}
         if self._database.ready:
             try:
-                stored = await save_catalog(self._database.pool, instruments_a + instruments_b, assessments)
+                stored = await save_catalog(self._database.pool, all_instruments, assessments)
             except Exception:
                 log.exception("saving the catalog failed")
         previous = self._pairs
@@ -157,14 +177,14 @@ class InstrumentService:
 
         self._pairs = pairs
         self._refreshed_at_ms = int(self._clock() * 1000)
-        self._last_error = None
+        if not failures:
+            self._last_error = None
         summary = self.summary()
         self._journal.emit(
             Level.INFO,
             "instruments",
             "refreshed",
-            binance=len(instruments_a),
-            mexc=len(instruments_b),
+            contracts={name: len(instruments) for name, instruments in by_exchange.items()},
             pairs=summary["pairs"],
             suspicious=summary["suspicious"],
             saved=bool(stored),

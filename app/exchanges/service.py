@@ -18,12 +18,14 @@ from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any, Callable
 
-from app.config.settings import ExchangesSettings
+from app.config.settings import READ_ONLY_EXCHANGES, ExchangesSettings
 from app.core.account import AccountFacts, judge
 from app.exchanges.base import ExchangeAdapter
 from app.exchanges.binance.adapter import BinanceAdapter
 from app.exchanges.ccxt_support import describe_error
+from app.exchanges.gate.adapter import GateAdapter
 from app.exchanges.mexc.adapter import MexcAdapter
+from app.exchanges.variational.adapter import VariationalAdapter
 from app.journal.journal import Journal, Level
 from app.keystore.keystore import Keystore, api_key_name, api_secret_name, mask
 from app.system.log_setup import SecretRedactor
@@ -49,6 +51,10 @@ def default_adapter_factory(name: str, key: str | None, secret: str | None, sett
         return BinanceAdapter(key, secret, demo=settings.binance.demo, timeout_s=settings.request_timeout_s)
     if name == "mexc":
         return MexcAdapter(key, secret, timeout_s=settings.request_timeout_s)
+    if name == "gate":
+        return GateAdapter(key, secret, timeout_s=settings.request_timeout_s)
+    if name == "variational":
+        return VariationalAdapter(timeout_s=settings.request_timeout_s, min_interval_ms=settings.variational.poll_ms)
     raise UnknownExchange(name)
 
 
@@ -100,17 +106,22 @@ class ExchangeService:
         self._factory = adapter_factory
         self._clock = clock
         self._exchanges: dict[str, _Exchange] = {}
-        enabled = {"binance": settings.binance.enabled, "mexc": settings.mexc.enabled}
-        for name, is_enabled in enabled.items():
-            if not is_enabled:
-                continue
-            key, secret = self._read_keys(name)
+        for name in settings.enabled_names():
+            key, secret = (None, None) if name in READ_ONLY_EXCHANGES else self._read_keys(name)
             self._exchanges[name] = _Exchange(
                 name=name,
                 demo=name == "binance" and settings.binance.demo,
                 adapter=adapter_factory(name, key, secret, settings),
                 key_masked=mask(key) if key and secret else None,
             )
+
+    @property
+    def names(self) -> list[str]:
+        return list(self._exchanges)
+
+    @staticmethod
+    def read_only(name: str) -> bool:
+        return name in READ_ONLY_EXCHANGES
 
     # ── keys ─────────────────────────────────────────────────────────────────
 
@@ -142,6 +153,8 @@ class ExchangeService:
 
     async def save_keys(self, name: str, api_key: str, api_secret: str) -> dict[str, Any]:
         exchange = self._get(name)
+        if self.read_only(name):
+            raise InvalidKeys(f"{name} has no trading API, keys are not used")
         api_key, api_secret = api_key.strip(), api_secret.strip()
         if not KEY_PATTERN.match(api_key) or not KEY_PATTERN.match(api_secret):
             raise InvalidKeys("key and secret must be 8–256 visible ASCII characters without spaces")
@@ -179,6 +192,8 @@ class ExchangeService:
 
     async def check(self, name: str) -> dict[str, Any]:
         exchange = self._get(name)
+        if self.read_only(name):
+            raise InvalidKeys(f"{name} has no trading API, there is no account to check")
         if exchange.key_masked is None:
             raise InvalidKeys("no keys saved for this exchange")
         if exchange.checking:
@@ -295,6 +310,7 @@ class ExchangeService:
                 "clock_warning": exchange.clock_offset_ms is not None
                 and abs(exchange.clock_offset_ms) > self._settings.clock_warning_ms,
                 "keys": self._keys_state(exchange),
+                "read_only": self.read_only(exchange.name),
             }
             for exchange in self._exchanges.values()
         ]
@@ -311,6 +327,7 @@ class ExchangeService:
             "key_masked": exchange.key_masked,
             "keys": self._keys_state(exchange),
             "check": exchange.check,
+            "read_only": self.read_only(exchange.name),
         }
 
     def describe(self) -> list[dict[str, Any]]:

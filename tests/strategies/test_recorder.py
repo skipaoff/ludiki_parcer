@@ -4,6 +4,7 @@ from decimal import Decimal
 import pytest
 
 from app.config.settings import REPO_ROOT
+from app.core.pairs import Quote, assess_pair
 from app.market.radar_recorder import snapshot_rows
 from app.market.state import MarketState
 from app.storage.ids import LocalIds
@@ -59,6 +60,37 @@ def test_gap_history_is_written_on_entry_every_second_and_on_end():
     assert final["samples_count"] == len(samples)
     assert set(final) == set(first)  # same columns, so the write queue collapses both into one upsert
     assert recorder.open_count == 0
+
+
+def test_gap_of_a_suspicious_pair_is_counted_but_not_recorded():
+    engine, state, clock, binance, mexc, recorder, rows = record_engine()
+    record = engine._catalog.records()[0]
+    record.assessment = assess_pair(
+        record.assessment.a, record.assessment.b, Quote(mark=Decimal("100"), index=Decimal("100")), Quote(mark=Decimal("100"), index=Decimal("104"))
+    )
+    engine.tick()
+    push_market(state)
+    engine.tick()
+    clock.now += 400
+    push_market(state)
+    engine.tick()
+
+    assert len(engine.view()["rows"]) == 1
+    assert rows == [] and recorder.skipped_suspicious == 1
+
+
+def test_price_mismatch_pair_never_reaches_the_radar():
+    engine, state, clock, *_ = record_engine()
+    record = engine._catalog.records()[0]
+    record.assessment = assess_pair(record.assessment.a, record.assessment.b, Quote(mark=Decimal("100")), Quote(mark=Decimal("150"), index=Decimal("150")))
+    engine.tick()
+    push_market(state)
+    engine.tick()
+    assert engine.view()["stats"]["radar_pairs"] == 0
+
+    record.manually_verified = True
+    engine.tick()
+    assert engine.view()["stats"]["radar_pairs"] == 1
 
 
 def test_candidate_that_never_reaches_the_feed_is_not_recorded():

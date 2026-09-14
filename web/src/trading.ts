@@ -34,6 +34,7 @@ export function reasonText(reason: string): string {
     insufficient_margin: "не хватает свободной маржи",
     balance_unknown: "баланс не получен",
     exchange_blocked: "биржа заблокирована",
+    exchange_read_only: "у биржи нет торгового API, только наблюдение",
     below_min_qty: "меньше минимального количества",
     below_min_notional: "меньше минимальной суммы",
     above_max_market_qty: "больше максимума рыночного ордера",

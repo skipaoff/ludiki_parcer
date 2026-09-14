@@ -32,7 +32,9 @@ from app.config.settings import REPO_ROOT, Settings, load_settings
 from app.exchanges.service import ExchangeService
 from app.instruments.service import InstrumentService
 from app.market.binance_streams import BinanceStreams
+from app.market.gate_market import GateMarket
 from app.market.mexc_market import MexcMarket
+from app.market.variational_market import VariationalMarket
 from app.market.state import MarketState
 from app.market.radar_recorder import RadarRecorder
 from app.execution.service import ExecutionService
@@ -104,25 +106,35 @@ async def _serve(
     )
     journal.add_sink(lambda event: writer.submit("events", event.to_row()))
     exchanges = ExchangeService(settings.exchanges, keystore, journal, writer.submit, redactor)
-    instruments = InstrumentService(exchanges.adapter, database, journal, settings.instruments)
+    instruments = InstrumentService(exchanges.names, exchanges.adapter, database, journal, settings.instruments)
     market = MarketState()
-    binance_streams = BinanceStreams(market)
-    mexc_market = MexcMarket(market, settings.feed.mexc_ticker_poll_ms)
-    default_fees = {
-        "binance": settings.feed.default_taker_fee_binance_pct,
-        "mexc": settings.feed.default_taker_fee_mexc_pct,
-    }
+    feeds: dict[str, Any] = {}
+    if "binance" in exchanges.names:
+        binance_streams = BinanceStreams(market)
+        feeds["binance"] = binance_streams
+    if "mexc" in exchanges.names:
+        feeds["mexc"] = MexcMarket(market, settings.feed.mexc_ticker_poll_ms)
+    if "gate" in exchanges.names:
+        feeds["gate"] = GateMarket(market, settings.feed.gate_ticker_poll_ms)
+    if "variational" in exchanges.names:
+        feeds["variational"] = VariationalMarket(
+            market, lambda: exchanges.adapter("variational"), settings.exchanges.variational.poll_ms
+        )
+
+    def on_catalog(contracts: list[Any]) -> None:
+        if "binance" in feeds:
+            feeds["binance"].set_radar(item.symbol_raw for item in contracts if item.exchange == "binance")
 
     def taker_fee_pct(exchange: str) -> Decimal:
         account = exchanges.account_taker_fee_pct(exchange)
-        return account if account is not None else default_fees[exchange]
+        return account if account is not None else settings.feed.default_taker_fee_pct(exchange)
 
     def feed_snapshot() -> dict[str, Any]:
         current = engine.settings()
         return {
             "size_usd": str(current.size_usd),
             "min_roi_pct": str(current.min_roi_pct),
-            "taker_fee_pct": {exchange: str(taker_fee_pct(exchange)) for exchange in default_fees},
+            "taker_fee_pct": {exchange: str(taker_fee_pct(exchange)) for exchange in exchanges.names},
             "enter_after_ms": current.enter_after_ms,
             "exit_hysteresis_pct": str(current.exit_hysteresis_pct),
             "exit_after_ms": current.exit_after_ms,
@@ -155,13 +167,13 @@ async def _serve(
     engine = PriceGapEngine(
         instruments,
         market,
-        binance_streams,
-        mexc_market,
+        feeds,
         settings.feed,
         taker_fee_pct,
-        binance_streams.set_radar,
+        on_catalog,
         sink=recorder,
         pinned=portfolio.pinned_pair_keys,
+        fresh_ms_overrides={"variational": settings.exchanges.variational.max_quote_age_ms},
     )
     feed_settings = FeedSettingsService(engine, database, journal)
     radar_recorder = RadarRecorder(instruments, market, writer.submit)
@@ -220,7 +232,7 @@ async def _serve(
             "feed": {
                 **engine.view(),
                 "rows": execution.annotate(engine.view()["rows"]),
-                "streams": {"binance": binance_streams.stats(), "mexc": mexc_market.stats()},
+                "streams": {name: feed.stats() for name, feed in feeds.items()},
             },
             "trading": {**execution.status(), "private_streams": private_streams.connected, "order_events": order_events.received},
             "history": {"recorded": recorder.recorded, "open": recorder.open_count, "radar_snapshots": radar_recorder.snapshots},
@@ -282,8 +294,7 @@ async def _serve(
         asyncio.create_task(exchanges.run_monitor()),
         asyncio.create_task(exchanges.check_all_with_keys()),
         asyncio.create_task(instruments.run()),
-        asyncio.create_task(binance_streams.run()),
-        asyncio.create_task(mexc_market.run()),
+        *(asyncio.create_task(feed.run()) for feed in feeds.values()),
         asyncio.create_task(engine.run()),
         asyncio.create_task(radar_recorder.run()),
         asyncio.create_task(portfolio.run_positions()),

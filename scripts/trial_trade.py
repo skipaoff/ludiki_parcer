@@ -9,6 +9,7 @@ Anti-goal:
 Usage (from the repository folder):
     .venv\\Scripts\\python.exe scripts\\trial_trade.py binance --demo --i-understand
     .venv\\Scripts\\python.exe scripts\\trial_trade.py mexc --symbol DOGE_USDT --i-understand
+    .venv\\Scripts\\python.exe scripts\\trial_trade.py gate --i-understand
 Results go to ../ludik-data/trials/<exchange>-<time>.json; copy the findings to docs/EXCHANGES.md as [проверено].
 """
 
@@ -33,7 +34,7 @@ from app.system.event_loop import loop_factory  # noqa: E402
 from app.system.log_setup import SecretRedactor  # noqa: E402
 from app.system.tls import use_system_trust_store  # noqa: E402
 
-DEFAULT_SYMBOLS = {"binance": "DOGEUSDT", "mexc": "DOGE_USDT"}
+DEFAULT_SYMBOLS = {"binance": "DOGEUSDT", "mexc": "DOGE_USDT", "gate": "DOGE_USDT"}
 
 
 def plain(value):
@@ -100,7 +101,7 @@ async def trial(exchange: str, symbol: str, demo: bool) -> dict:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Open and close the minimum position once, to see what the exchange really answers.")
-    parser.add_argument("exchange", choices=["binance", "mexc"])
+    parser.add_argument("exchange", choices=["binance", "mexc", "gate"])
     parser.add_argument("--symbol")
     parser.add_argument("--demo", action="store_true", help="Binance demo trading with demo keys")
     parser.add_argument("--i-understand", action="store_true", help="real orders are sent (on a live account, real money)")

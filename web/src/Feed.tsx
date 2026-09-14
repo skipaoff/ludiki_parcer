@@ -19,6 +19,9 @@ interface Filters {
   volumeMin: string;
   capacityMin: string;
   showSuspicious: boolean;
+  showReadOnly: boolean;
+  longExchange: string;
+  shortExchange: string;
   search: string;
   sort: SortKey;
 }
@@ -28,9 +31,14 @@ const DEFAULT_FILTERS: Filters = {
   volumeMin: "1000000",
   capacityMin: "",
   showSuspicious: false,
+  showReadOnly: true,
+  longExchange: "",
+  shortExchange: "",
   search: "",
   sort: "roi",
 };
+
+const READ_ONLY = new Set(["variational"]);
 
 const BLOCK_TEXT: Record<string, string> = {
   stale: "данные устарели",
@@ -184,6 +192,9 @@ export function FeedScreen({ token, snapshot }: { token: string; snapshot: Snaps
       if (row.volume24h_weak_usd !== null && Number(row.volume24h_weak_usd) < volumeMin) return false;
       if (capacityMin && Number(row.capacity_usd ?? 0) < capacityMin) return false;
       if (!filters.showSuspicious && row.suspicious) return false;
+      if (filters.longExchange && row.long?.exchange !== filters.longExchange) return false;
+      if (filters.shortExchange && row.short?.exchange !== filters.shortExchange) return false;
+      if (!filters.showReadOnly && (READ_ONLY.has(row.long?.exchange ?? "") || READ_ONLY.has(row.short?.exchange ?? ""))) return false;
       if (query && !row.token.includes(query)) return false;
       return true;
     });
@@ -195,6 +206,7 @@ export function FeedScreen({ token, snapshot }: { token: string; snapshot: Snaps
   const settings = feed?.settings;
   const stats = feed?.stats ?? {};
   const streams = feed?.streams;
+  const exchanges = (snapshot?.exchanges ?? []).map((exchange) => exchange.name);
 
   return (
     <div className="gaps">
@@ -213,12 +225,35 @@ export function FeedScreen({ token, snapshot }: { token: string; snapshot: Snaps
             <input type="checkbox" checked={filters.showSuspicious} onChange={(event) => set("showSuspicious", event.target.checked)} />{" "}
             подозрит.
           </label>
+          <label className="check-label" title="Variational: торгового API нет, вилки только для наблюдения">
+            <input type="checkbox" checked={filters.showReadOnly} onChange={(event) => set("showReadOnly", event.target.checked)} />{" "}
+            только наблюдение
+          </label>
+          <select value={filters.longExchange} onChange={(event) => set("longExchange", event.target.value)}>
+            <option value="">лонг: все</option>
+            {exchanges.map((name) => (
+              <option key={name} value={name}>
+                лонг {name.toUpperCase()}
+              </option>
+            ))}
+          </select>
+          <select value={filters.shortExchange} onChange={(event) => set("shortExchange", event.target.value)}>
+            <option value="">шорт: все</option>
+            {exchanges.map((name) => (
+              <option key={name} value={name}>
+                шорт {name.toUpperCase()}
+              </option>
+            ))}
+          </select>
           <input placeholder="монета" value={filters.search} onChange={(event) => set("search", event.target.value)} />
         </div>
         <div className="toolbar muted">
           <SettingsForm token={token} sizeUsd={settings?.size_usd} minRoiPct={settings?.min_roi_pct} />
           <span>
-            тейкер Binance {settings?.taker_fee_pct?.binance ?? "—"}% · MEXC {settings?.taker_fee_pct?.mexc ?? "—"}%
+            тейкер{" "}
+            {Object.entries(settings?.taker_fee_pct ?? {})
+              .map(([name, fee]) => `${name.toUpperCase()} ${fee}%`)
+              .join(" · ") || "—"}
           </span>
           <span>
             сорт:{" "}
@@ -286,13 +321,17 @@ export function FeedScreen({ token, snapshot }: { token: string; snapshot: Snaps
           пар {stats.pairs ?? "—"} · в радаре {stats.radar_pairs ?? "—"} · стаканов {stats.books ?? "—"} · отслеживается{" "}
           {stats.tracked ?? "—"} · вилок с запуска {stats.gaps_entered ?? "—"} · такт {stats.tick_ms ?? "—"}мс · лаг{" "}
           {stats.loop_lag_ms ?? "—"}мс
-          {streams && (
-            <>
-              {" "}
-              · Binance соединений {streams.binance?.connections}/{streams.binance?.sockets} · MEXC стаканов{" "}
-              {streams.mexc?.depth_symbols}, опросов {streams.mexc?.polls}
-            </>
-          )}
+          {streams &&
+            Object.entries(streams).map(([name, info]) => (
+              <span key={name}>
+                {" "}
+                · {name.toUpperCase()}
+                {info.sockets !== undefined ? ` соединений ${info.connections}/${info.sockets}` : ""}
+                {info.depth_symbols !== undefined ? ` стаканов ${info.depth_symbols}` : ""}
+                {info.polls !== undefined ? ` опросов ${info.polls}${info.poll_errors ? ` (ошибок ${info.poll_errors})` : ""}` : ""}
+                {info.listings !== undefined ? ` рынков ${info.listings}` : ""}
+              </span>
+            ))}
         </div>
       </section>
       <PortfolioColumn token={token} snapshot={snapshot} />

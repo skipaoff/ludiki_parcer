@@ -111,7 +111,7 @@ function ExchangeIndicator({ exchange }: { exchange: ExchangeState }) {
   if (exchange.link === "unknown") {
     return <span className="indicator muted">○ {title} …</span>;
   }
-  const note = KEYS_NOTE[exchange.keys];
+  const note = exchange.read_only ? "только данные" : KEYS_NOTE[exchange.keys];
   return (
     <span className="indicator">
       ● {title} {exchange.ping_ms}мс

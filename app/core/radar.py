@@ -40,16 +40,43 @@ def best_price_roi(
     return TopRoi(key, exchange_b, exchange_a, b_long)
 
 
-def leg_fresh(book_age_ms: float | None, stream_age_ms: float | None, fresh_ms: int, quiet_book_max_ms: int) -> bool:
+@dataclass(frozen=True, slots=True)
+class TopCheck:
+    """The exchange's independently delivered best prices of the same contract, per token."""
+
+    bid: float
+    ask: float
+
+
+PRICE_TOLERANCE = 1e-9
+
+
+def _same_price(a: float, b: float) -> bool:
+    return abs(a - b) <= PRICE_TOLERANCE * max(abs(a), abs(b), 1e-18)
+
+
+def leg_fresh(
+    book_age_ms: float | None,
+    book_bid: float | None,
+    book_ask: float | None,
+    top: TopCheck | None,
+    fresh_ms: int,
+    quiet_book_max_ms: int,
+) -> bool:
     """
-    A book is fresh when it changed recently, or when it is quiet but its connection is demonstrably alive:
-    exchanges push order books only on change, so a still book on a live connection is still the book.
+    A book is fresh when it changed recently. A quiet book (exchanges push books only on change) is still trusted for up
+    to quiet_book_max_ms, but only while the contract's own best prices — delivered separately — match it exactly.
+    Prices that differ mean one of the two sources stopped updating, and there is no telling which: not fresh.
+    A live connection alone proves nothing: it carries other contracts too (13.09.2026, a Binance book of ALT stood
+    still for 4.5 s during a pump while frames of other contracts kept the connection busy).
     """
     if book_age_ms is None:
         return False
     if book_age_ms <= fresh_ms:
         return True
-    return stream_age_ms is not None and stream_age_ms <= fresh_ms and book_age_ms <= quiet_book_max_ms
+    if book_age_ms > quiet_book_max_ms or top is None or book_bid is None or book_ask is None:
+        return False
+    return _same_price(top.bid, book_bid) and _same_price(top.ask, book_ask)
 
 
 def choose_books(

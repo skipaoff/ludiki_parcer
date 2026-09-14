@@ -94,7 +94,11 @@ export function describe(event: JournalEvent): string {
     case "settings.changed":
       return `настройка ${String(payload.key)}: ${String(payload.old)} → ${String(payload.new)}`;
     case "instruments.refreshed":
-      return `пары обновлены · Binance ${String(payload.binance)} · MEXC ${String(payload.mexc)} · общих ${String(payload.pairs)} · подозрительных ${String(payload.suspicious)}`;
+    {
+      const contracts = (payload.contracts ?? {}) as Record<string, number>;
+      const parts = Object.entries(contracts).map(([name, count]) => `${name.toUpperCase()} ${count}`);
+      return `пары обновлены · ${parts.join(" · ")} · пар ${String(payload.pairs)} · подозрительных ${String(payload.suspicious)}`;
+    }
     case "instruments.refresh_failed":
       return `не удалось обновить пары · ${String(payload.error ?? "")}`;
     case "instruments.pair_flags":

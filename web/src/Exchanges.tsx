@@ -128,6 +128,25 @@ function ExchangeCard({
 
   const check = () => run("проверка", () => apiSend<ExchangeDetails>("POST", `/api/exchanges/${exchange.name}/check`, token));
 
+  if (exchange.read_only) {
+    return (
+      <section className="exchange-card">
+        <h2>
+          {exchangeTitle(exchange)}{" "}
+          <span className={link.link === "down" ? "blink" : "muted"}>
+            {link.link === "up" && link.ping_ms != null ? `· данные ${link.ping_ms}мс` : link.link === "down" ? "· нет связи" : "· проверка связи…"}
+          </span>
+        </h2>
+        {link.link === "down" && exchange.probe_error && <p className="muted">{exchange.probe_error}</p>}
+        <p className="muted">
+          Только наблюдение: у Variational пока нет торгового API. Вилки с Variational видны в ленте и записываются в историю,
+          но открыть их через терминал нельзя. Котировки обновляются раз в несколько секунд и не содержат стакана — цена берётся
+          на размер $1 тыс. и $100 тыс.
+        </p>
+      </section>
+    );
+  }
+
   return (
     <section className="exchange-card">
       <h2>

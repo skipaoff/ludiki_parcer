@@ -146,11 +146,13 @@ export function TradesScreen({ token }: { token: string }) {
           <option value="">лонг: все</option>
           <option value="binance">лонг BINANCE</option>
           <option value="mexc">лонг MEXC</option>
+          <option value="gate">лонг GATE</option>
         </select>
         <select value={shortExchange} onChange={(event) => setShortExchange(event.target.value)}>
           <option value="">шорт: все</option>
           <option value="binance">шорт BINANCE</option>
           <option value="mexc">шорт MEXC</option>
+          <option value="gate">шорт GATE</option>
         </select>
         <input placeholder="монета" value={coin} onChange={(event) => setCoin(event.target.value)} spellCheck={false} />
         <button className="action" onClick={() => void exportCsv()}>

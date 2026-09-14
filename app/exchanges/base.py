@@ -27,8 +27,8 @@ class ClockProbe:
     """One public round trip: how long it took and how far the exchange clock is from ours."""
 
     ping_ms: int
-    clock_offset_ms: int
-    server_ts_ms: int
+    clock_offset_ms: int | None
+    server_ts_ms: int | None
 
 
 @dataclass(frozen=True, slots=True)

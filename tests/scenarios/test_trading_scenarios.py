@@ -30,6 +30,10 @@ class FakeExchanges:
     def __init__(self, adapters):
         self.adapters = adapters
 
+    @property
+    def names(self):
+        return list(self.adapters)
+
     def snapshot(self):
         return [{"name": name, "keys": "ok"} for name in self.adapters]
 

@@ -1,5 +1,5 @@
 """
-VFP: Which contracts on two exchanges form a tradable pair, and whether the pair is trustworthy — from instruments and public quotes.
+VFP: Which contracts on any two exchanges form a tradable pair, and whether the pair is trustworthy — from instruments and public quotes.
 Changes when: the rules for matching contracts or flagging a pair as suspicious change (PLAN.md, section 6).
 Anti-goal:
 1. Comparing prices in exchange units — 1000PEPEUSDT and PEPE_USDT only compare per token.
@@ -69,6 +69,16 @@ def match_instruments(left: list[Instrument], right: list[Instrument]) -> list[t
     return sorted(pairs, key=lambda pair: (pair[0].token, pair[0].symbol_raw, pair[1].symbol_raw))
 
 
+def match_all(by_exchange: dict[str, list[Instrument]], order: list[str]) -> list[tuple[Instrument, Instrument]]:
+    """Pairs across every two exchanges; the exchange earlier in order is always leg a, so pair keys stay stable."""
+    present = [name for name in order if name in by_exchange]
+    pairs = []
+    for index, left in enumerate(present):
+        for right in present[index + 1 :]:
+            pairs.extend(match_instruments(by_exchange[left], by_exchange[right]))
+    return pairs
+
+
 def assess_pair(
     a: Instrument,
     b: Instrument,
@@ -81,6 +91,12 @@ def assess_pair(
     price_b = per_token(quote_b.mid, b) if quote_b else None
     index_a = per_token(quote_a.index, a) if quote_a else None
     index_b = per_token(quote_b.index, b) if quote_b else None
+    # A venue that publishes no index (Variational) is compared by its mark price against the other side's index.
+    # Both indices missing stays "index_missing": two marks prove nothing about the underlying asset.
+    if index_a is None and index_b is not None and quote_a is not None:
+        index_a = per_token(quote_a.mark, a)
+    elif index_b is None and index_a is not None and quote_b is not None:
+        index_b = per_token(quote_b.mark, b)
     price_gap = price_gap_pct(price_a, price_b) if price_a and price_b else None
     index_gap = price_gap_pct(index_a, index_b) if index_a and index_b else None
 

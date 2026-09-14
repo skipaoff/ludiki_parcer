@@ -1,0 +1,193 @@
+{
+ "total_volume_24h": "1118015967.132949",
+ "cumulative_volume": "330758822034.884142",
+ "tvl": "194850427.785672501125",
+ "open_interest": "1675489624.1195983159058580616",
+ "num_markets": 553,
+ "loss_refund": {
+  "pool_size": "0",
+  "refunded_24h": "0"
+ },
+ "listings": [
+  {
+   "ticker": "1000PEPE",
+   "name": "Pepe",
+   "mark_price": "0.003442312402221234",
+   "volume_24h": "333367.514557",
+   "open_interest": {
+    "long_open_interest": "410595.41959214076644872500000",
+    "short_open_interest": "35711.040450144704861525000000"
+   },
+   "funding_rate": "0.1095",
+   "funding_interval_s": 28800,
+   "base_spread_bps": "14.525119790910409545152528000",
+   "quotes": {
+    "updated_at": "2026-09-14T08:00:55.512675729Z",
+    "base": {
+     "bid": "0.003439",
+     "ask": "0.003444"
+    },
+    "size_1k": {
+     "bid": "0.003438",
+     "ask": "0.003444"
+    },
+    "size_100k": {
+     "bid": "0.003435",
+     "ask": "0.003447"
+    }
+   }
+  },
+  {
+   "ticker": "SOL",
+   "name": "Solana",
+   "mark_price": "101.4400031988964",
+   "volume_24h": "32699308.556463",
+   "open_interest": {
+    "long_open_interest": "17078564.616883972040252880000",
+    "short_open_interest": "9093758.180312590564504430000"
+   },
+   "funding_rate": "0.085652",
+   "funding_interval_s": 28800,
+   "base_spread_bps": "1.8730283321015024777454580000",
+   "quotes": {
+    "updated_at": "2026-09-14T08:01:34.576035957Z",
+    "base": {
+     "bid": "101.449",
+     "ask": "101.468"
+    },
+    "size_1k": {
+     "bid": "101.449",
+     "ask": "101.468"
+    },
+    "size_100k": {
+     "bid": "101.439",
+     "ask": "101.47"
+    },
+    "size_1m": {
+     "bid": "101.401",
+     "ask": "101.496"
+    }
+   }
+  },
+  {
+   "ticker": "IWM",
+   "name": "iShares Russell 2000 ETF",
+   "mark_price": "288.0956070155796",
+   "volume_24h": "57702.267203",
+   "open_interest": {
+    "long_open_interest": "98197.77697164912501687000000",
+    "short_open_interest": "33020.322060295657349080000000"
+   },
+   "funding_rate": "0",
+   "funding_interval_s": 28800,
+   "base_spread_bps": "6.4214793802807132697687350000",
+   "quotes": {
+    "updated_at": "2026-09-14T08:01:08.596471841Z",
+    "base": {
+     "bid": "288.083",
+     "ask": "288.268"
+    },
+    "size_1k": {
+     "bid": "288.083",
+     "ask": "288.268"
+    },
+    "size_100k": {
+     "bid": "281.703",
+     "ask": "294.892"
+    }
+   }
+  },
+  {
+   "ticker": "ETH",
+   "name": "Ethereum",
+   "mark_price": "2519.585742918693",
+   "volume_24h": "174975733.389778",
+   "open_interest": {
+    "long_open_interest": "107667168.09496075140047055000",
+    "short_open_interest": "38604122.146591730463843790000"
+   },
+   "funding_rate": "0.082702",
+   "funding_interval_s": 28800,
+   "base_spread_bps": "1.1112937941760515686975260000",
+   "quotes": {
+    "updated_at": "2026-09-14T08:01:30.399586756Z",
+    "base": {
+     "bid": "2519.75",
+     "ask": "2520.03"
+    },
+    "size_1k": {
+     "bid": "2519.74",
+     "ask": "2520.03"
+    },
+    "size_100k": {
+     "bid": "2519.59",
+     "ask": "2520.19"
+    },
+    "size_1m": {
+     "bid": "2518.84",
+     "ask": "2520.93"
+    }
+   }
+  },
+  {
+   "ticker": "POWER",
+   "name": "Power Protocol",
+   "mark_price": "0.1201385521994912",
+   "volume_24h": "100158.816163",
+   "open_interest": {
+    "long_open_interest": "7824.5859038631640983700000000",
+    "short_open_interest": "28424.075611913878414310000000"
+   },
+   "funding_rate": "0.1095",
+   "funding_interval_s": 14400,
+   "base_spread_bps": "24.971168247628552081089532000",
+   "quotes": {
+    "updated_at": "2026-09-14T08:01:21.335227521Z",
+    "base": {
+     "bid": "0.1206",
+     "ask": "0.1209"
+    },
+    "size_1k": {
+     "bid": "0.1205",
+     "ask": "0.121"
+    },
+    "size_100k": {
+     "bid": "0.1155",
+     "ask": "0.1269"
+    }
+   }
+  },
+  {
+   "ticker": "BTC",
+   "name": "Bitcoin",
+   "mark_price": "77768.61982616",
+   "volume_24h": "266784466.176711",
+   "open_interest": {
+    "long_open_interest": "83596810.96106221875194250000",
+    "short_open_interest": "66108507.848687980496721060000"
+   },
+   "funding_rate": "0.080685",
+   "funding_interval_s": 28800,
+   "base_spread_bps": "1.0814130453644779064635690000",
+   "quotes": {
+    "updated_at": "2026-09-14T08:01:11.466733379Z",
+    "base": {
+     "bid": "77755.75",
+     "ask": "77764.16"
+    },
+    "size_1k": {
+     "bid": "77755.58",
+     "ask": "77764.34"
+    },
+    "size_100k": {
+     "bid": "77751.96",
+     "ask": "77767.95"
+    },
+    "size_1m": {
+     "bid": "77738.18",
+     "ask": "77781.74"
+    }
+   }
+  }
+ ]
+}

@@ -47,6 +47,14 @@ demo = false                # true: Binance demo trading (demo-fapi.binance.com)
 [exchanges.mexc]
 enabled = true
 
+[exchanges.gate]
+enabled = true
+
+[exchanges.variational]
+enabled = true              # read-only: Variational Omni has no trading API yet, its gaps are shown but cannot be opened
+poll_ms = 2000              # public statistics limit is 10 requests per 10 seconds per IP
+max_quote_age_ms = 30000    # public quotes come from a cache and are about a minute old: older than this they never make a gap
+
 [instruments]
 refresh_interval_s = 3600   # contracts, steps and pairs reload
 max_price_gap_pct = 20      # wider per-token price gap means a wrong multiplier or a different token
@@ -59,8 +67,8 @@ candidate_margin_pct = 0.50     # pairs this close to the threshold by best pric
 book_limit = 60                 # pairs with live order books at once
 tracking_limit = 20             # of those, at most this many follow gaps that left the feed until prices converge
 radar_rows = 20                 # best current spreads shown under the feed even below the threshold
-fresh_ms = 1000                 # a leg older than this greys the row out...
-quiet_book_max_ms = 10000       # ...unless its connection delivered frames within fresh_ms: exchanges push books only on change
+fresh_ms = 1000                 # a leg whose book changed longer ago than this greys the row out...
+quiet_book_max_ms = 10000       # ...unless the exchange's best prices, received after the book, still match it: books are pushed only on change
 resubscribe_after_ms = 5000     # no book this long after subscribing, or older than quiet_book_max_ms: subscribe again
 tick_ms = 200
 enter_after_ms = 300            # ROI must hold this long before a gap enters the feed
@@ -68,7 +76,10 @@ exit_hysteresis_pct = 0.10
 exit_after_ms = 2000
 default_taker_fee_binance_pct = 0.05   # used until an accepted key check reports the account rate
 default_taker_fee_mexc_pct = 0.05
+default_taker_fee_gate_pct = 0.075     # Gate contract default taker rate
+default_taker_fee_variational_pct = 0  # Variational charges no fees, it earns on the spread already inside its quotes
 mexc_ticker_poll_ms = 1000      # MEXC best prices come from REST: the all-symbols websocket has no bid/ask
+gate_ticker_poll_ms = 1000      # Gate best prices, mark, index and volume of all contracts in one REST answer
 
 [portfolio]
 positions_poll_s = 5            # positions from REST; needs keys
@@ -82,6 +93,7 @@ liquidation_warning_pct = 10    # warn when a leg is this close to its liquidati
 enabled = false
 leverage_binance = 3
 leverage_mexc = 3
+leverage_gate = 3
 isolated = true                 # isolated margin on both legs; false means cross
 entry_min_roi_pct = 0.50        # net ROI by book at the moment of the click; below it no orders leave
 max_open_pairs = 3

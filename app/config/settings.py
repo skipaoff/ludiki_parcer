@@ -79,12 +79,35 @@ class MexcSettings(_Section):
     enabled: bool = True
 
 
+class GateSettings(_Section):
+    enabled: bool = True
+
+
+class VariationalSettings(_Section):
+    """Variational Omni publishes market statistics only; there is no trading API yet, so it is read-only."""
+
+    enabled: bool = True
+    poll_ms: int = Field(default=2000, ge=1000)  # public limit: 10 requests per 10 seconds per IP
+    # The public statistics are served from a cache: quotes were 41-105 s old, median about a minute (14.09.2026).
+    # Comparing minute-old prices with live books produces fake gaps, so they stay "stale" until fresher data exists.
+    max_quote_age_ms: int = Field(default=30000, ge=1000)
+
+
+EXCHANGE_ORDER = ("binance", "mexc", "gate", "variational")
+READ_ONLY_EXCHANGES = frozenset({"variational"})
+
+
 class ExchangesSettings(_Section):
     probe_interval_s: float = Field(default=10, ge=2)
     request_timeout_s: float = Field(default=10, gt=0)
     clock_warning_ms: int = Field(default=1000, ge=100)
     binance: BinanceSettings = BinanceSettings()
     mexc: MexcSettings = MexcSettings()
+    gate: GateSettings = GateSettings()
+    variational: VariationalSettings = VariationalSettings()
+
+    def enabled_names(self) -> list[str]:
+        return [name for name in EXCHANGE_ORDER if getattr(self, name).enabled]
 
 
 class InstrumentsSettings(_Section):
@@ -109,7 +132,13 @@ class FeedSettings(_Section):
     exit_after_ms: int = Field(default=2000, ge=0)
     default_taker_fee_binance_pct: Decimal = Field(default=Decimal("0.05"), ge=0)
     default_taker_fee_mexc_pct: Decimal = Field(default=Decimal("0.05"), ge=0)
+    default_taker_fee_gate_pct: Decimal = Field(default=Decimal("0.075"), ge=0)
+    default_taker_fee_variational_pct: Decimal = Field(default=Decimal("0"), ge=0)
     mexc_ticker_poll_ms: int = Field(default=1000, ge=500)
+    gate_ticker_poll_ms: int = Field(default=1000, ge=500)
+
+    def default_taker_fee_pct(self, exchange: str) -> Decimal:
+        return getattr(self, f"default_taker_fee_{exchange}_pct")
 
 
 class PortfolioSettings(_Section):
@@ -123,6 +152,10 @@ class TradingSettings(_Section):
     enabled: bool = False
     leverage_binance: int = Field(default=3, ge=1, le=50)
     leverage_mexc: int = Field(default=3, ge=1, le=50)
+    leverage_gate: int = Field(default=3, ge=1, le=50)
+
+    def leverage(self, exchange: str) -> int:
+        return getattr(self, f"leverage_{exchange}", 1)
     isolated: bool = True
     entry_min_roi_pct: Decimal = Decimal("0.50")
     max_open_pairs: int = Field(default=3, ge=1, le=50)

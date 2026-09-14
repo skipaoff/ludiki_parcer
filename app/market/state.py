@@ -70,12 +70,16 @@ class MarketState:
     def count(self, exchange: str, messages: int = 1) -> None:
         self.messages[exchange] = self.messages.get(exchange, 0) + messages
 
-    def set_top(self, exchange: str, symbol: str, bid: float, ask: float, exchange_ts_ms: int) -> None:
+    def set_top(
+        self, exchange: str, symbol: str, bid: float, ask: float, exchange_ts_ms: int, received_ms: float | None = None
+    ) -> None:
+        """received_ms overrides arrival time for sources that republish cached quotes (their age starts at the quote)."""
         instrument = self._instruments.get((exchange, symbol))
         if instrument is None:
             return
         unit = float(instrument.price_unit_tokens)
-        self.tops[(exchange, symbol)] = Top(bid / unit, ask / unit, exchange_ts_ms, self._clock_ms())
+        seen = self._clock_ms() if received_ms is None else received_ms
+        self.tops[(exchange, symbol)] = Top(bid / unit, ask / unit, exchange_ts_ms, seen)
 
     def set_mark(
         self, exchange: str, symbol: str, mark: float | None, index: float | None, volume24h_usd: float | None = None
@@ -99,6 +103,7 @@ class MarketState:
         raw_bids: Sequence[Sequence[str | float]],
         raw_asks: Sequence[Sequence[str | float]],
         exchange_ts_ms: int,
+        received_ms: float | None = None,
     ) -> None:
         instrument = self._instruments.get((exchange, symbol))
         if instrument is None:
@@ -108,7 +113,7 @@ class MarketState:
             bids=per_token_levels(raw_bids, instrument, descending=True),
             asks=per_token_levels(raw_asks, instrument, descending=False),
             exchange_ts_ms=exchange_ts_ms,
-            received_ts_ms=int(self._clock_ms()),
+            received_ts_ms=int(self._clock_ms() if received_ms is None else received_ms),
         )
 
     def drop_book(self, key: Key) -> None:

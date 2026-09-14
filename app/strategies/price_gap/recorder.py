@@ -3,7 +3,8 @@ VFP: Turns the gap lifecycle into database history — one `opportunity_episodes
 Changes when: what is recorded about a gap, or how often, changes (PLAN.md, sections 8 and 11).
 Anti-goal:
 1. Waiting for the database — rows go to the write queue with locally issued ids.
-2. Recording flicker — candidates that never reached the feed are counted, not stored.
+2. Recording flicker or doubtful pairs — candidates that never reached the feed, and gaps of pairs flagged suspicious
+   or blacklisted, are counted, not stored.
 3. Losing an open episode on a crash — the row is refreshed every minute and dangling rows are closed at the next start.
 """
 
@@ -89,6 +90,7 @@ class EpisodeRecorder:
         self._ids = ids or LocalIds()
         self._open: dict[str, _Open] = {}
         self.recorded = 0
+        self.skipped_suspicious = 0
 
     @property
     def open_count(self) -> int:
@@ -100,6 +102,10 @@ class EpisodeRecorder:
 
     def entered(self, episode_key: str, record: PairRecord, state: EpisodeState, now_ms: int) -> None:
         if episode_key in self._open:
+            return
+        if record.suspicious or record.blacklisted:
+            # Gaps of pairs that may be two different assets would distort every statistic built on history.
+            self.skipped_suspicious += 1
             return
         long_exchange = episode_key.rsplit(">", 1)[1]
         short_exchange = record.assessment.b.exchange if long_exchange == record.assessment.a.exchange else record.assessment.a.exchange

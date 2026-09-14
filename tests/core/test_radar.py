@@ -1,20 +1,24 @@
 import pytest
 
-from app.core.radar import best_price_roi, choose_books, leg_fresh
+from app.core.radar import TopCheck, best_price_roi, choose_books, leg_fresh
+
+SAME = TopCheck(bid=0.006861, ask=0.006869)
+MOVED = TopCheck(bid=0.006905, ask=0.006912)
 
 
 @pytest.mark.parametrize(
-    ("book_age", "stream_age", "fresh"),
+    ("book_age", "top", "fresh"),
     [
-        (300, None, True),  # recent change
-        (4_000, 200, True),  # quiet book, connection alive
-        (4_000, 3_000, False),  # connection silent too
-        (12_000, 100, False),  # quiet for too long, trust it no more
-        (None, 100, False),  # no book yet
+        (300, None, True),  # recent change needs no confirmation
+        (4_000, SAME, True),  # quiet book confirmed by the contract's own best prices
+        (4_000, MOVED, False),  # the ALT case: best prices moved on, the book did not
+        (4_000, None, False),  # nothing to confirm a quiet book with
+        (12_000, SAME, False),  # quiet for too long, trust it no more
+        (None, SAME, False),  # no book yet
     ],
 )
-def test_leg_freshness(book_age, stream_age, fresh):
-    assert leg_fresh(book_age, stream_age, fresh_ms=1_000, quiet_book_max_ms=10_000) is fresh
+def test_leg_freshness(book_age, top, fresh):
+    assert leg_fresh(book_age, 0.006861, 0.006869, top, fresh_ms=1_000, quiet_book_max_ms=10_000) is fresh
 
 
 def test_direction_with_the_cheaper_ask_goes_long():

@@ -29,9 +29,6 @@ class FakeFeed:
     def resubscribe_depth(self, symbol):
         self.resubscribed.append(symbol)
 
-    def stream_age_ms(self, symbol):
-        return 10.0 if self.alive else None
-
 
 class Catalog:
     def __init__(self, records):
@@ -56,11 +53,10 @@ def build(record: PairRecord, **settings):
     engine = PriceGapEngine(
         Catalog([record]),
         state,
-        binance,
-        mexc,
+        {"binance": binance, "mexc": mexc},
         FeedSettings(size_usd=Decimal("1000"), min_roi_pct=Decimal("0.5"), enter_after_ms=300, **settings),
         lambda exchange: Decimal("0.05"),
-        radar_symbols.extend,
+        lambda instruments: radar_symbols.extend(sorted(item.symbol_raw for item in instruments)),
         clock,
     )
     return engine, state, clock, binance, mexc, radar_symbols
@@ -78,7 +74,7 @@ def push_market(state, mexc_ask="100.00", binance_bid="101.20"):
 def test_gap_enters_the_feed_after_holding_above_threshold():
     engine, state, clock, binance, mexc, radar_symbols = build(sol_record())
     engine.tick()  # catalog sync
-    assert radar_symbols == ["SOLUSDT"]
+    assert radar_symbols == ["SOLUSDT", "SOL_USDT"]
 
     push_market(state)
     engine.tick()  # radar sees the gap, books get chosen
@@ -110,15 +106,33 @@ def test_stale_leg_blocks_the_row_and_does_not_extend_the_gap():
     engine.tick()
     assert len(engine.view()["rows"]) == 1
 
-    binance.alive = mexc.alive = False
-    clock.now += 1_500  # books no longer change and the connections went silent
+    clock.now += 1_500  # books stood still; best prices still match them, so they are quiet, not stale
+    engine.tick()
+    assert engine.view()["rows"][0]["block"] is None
+
+    # The ALT case: Binance best prices move on while its order book does not.
+    state.set_top("binance", "SOLUSDT", 100.40, 100.41, 2)
+    clock.now += 200
     engine.tick()
     row = engine.view()["rows"][0]
     assert row["block"] == "stale"
 
-    clock.now += 2_100  # below the threshold for longer than exit_after_ms
+    clock.now += 2_100  # no fresh measurement for longer than exit_after_ms
     engine.tick()
     assert engine.view()["rows"] == []
+
+
+def test_quiet_book_is_trusted_only_up_to_its_limit():
+    engine, state, clock, *_ = build(sol_record(), quiet_book_max_ms=3_000)
+    engine.tick()
+    push_market(state)
+    engine.tick()
+    clock.now += 400
+    push_market(state)
+    engine.tick()
+    clock.now += 3_500
+    engine.tick()
+    assert engine.view()["rows"][0]["block"] == "stale"
 
 
 def test_suspicious_pair_is_shown_but_blocked():

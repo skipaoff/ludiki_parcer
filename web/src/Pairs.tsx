@@ -1,4 +1,4 @@
-// VFP: The Pairs service screen — every Binance–MEXC pair with units, steps, suspicion, links for manual checks and the manual flags.
+// VFP: The Pairs service screen — every cross-exchange pair with units, steps, suspicion, links for manual checks and the manual flags.
 // Changes when: pairs gain attributes or the manual verification workflow changes.
 // Anti-goal:
 // 1. Hiding why a pair is not tradable — every non-tradable row states its reason.
@@ -57,6 +57,7 @@ export function PairsScreen({ token, summary }: { token: string; summary: Instru
   const [filter, setFilter] = useState<Filter>("all");
   const [search, setSearch] = useState("");
   const [sort, setSort] = useState<SortKey>("volume");
+  const [venue, setVenue] = useState("");
   const [busy, setBusy] = useState<string | null>(null);
 
   const reload = useCallback(() => {
@@ -74,6 +75,7 @@ export function PairsScreen({ token, summary }: { token: string; summary: Instru
     const query = search.trim().toUpperCase();
     const rows = (pairs ?? []).filter((pair) => {
       if (query && !pair.token.includes(query) && !pair.a.symbol.includes(query) && !pair.b.symbol.includes(query)) return false;
+      if (venue && pair.a.exchange !== venue && pair.b.exchange !== venue && `${pair.a.exchange}|${pair.b.exchange}` !== venue) return false;
       if (filter === "suspicious") return pair.reason !== null;
       if (filter === "multiplier") return hasMultiplier(pair.a) || hasMultiplier(pair.b);
       if (filter === "blacklisted") return pair.blacklisted;
@@ -85,7 +87,18 @@ export function PairsScreen({ token, summary }: { token: string; summary: Instru
       sort === "token" ? x.token.localeCompare(y.token) : sort === "index" ? index(y) - index(x) : volume(y) - volume(x),
     );
     return rows;
-  }, [pairs, filter, search, sort]);
+  }, [pairs, filter, search, sort, venue]);
+
+  const venues = useMemo(() => {
+    const exchanges = new Set<string>();
+    const combos = new Set<string>();
+    for (const pair of pairs ?? []) {
+      exchanges.add(pair.a.exchange);
+      exchanges.add(pair.b.exchange);
+      combos.add(`${pair.a.exchange}|${pair.b.exchange}`);
+    }
+    return { exchanges: [...exchanges].sort(), combos: [...combos].sort() };
+  }, [pairs]);
 
   const update = async (pair: PairView, flags: { manually_verified?: boolean; blacklisted?: boolean }) => {
     setBusy(pair.key);
@@ -139,6 +152,19 @@ export function PairsScreen({ token, summary }: { token: string; summary: Instru
             {label}
           </button>
         ))}
+        <select value={venue} onChange={(event) => setVenue(event.target.value)}>
+          <option value="">биржи: все</option>
+          {venues.exchanges.map((name) => (
+            <option key={name} value={name}>
+              с {name.toUpperCase()}
+            </option>
+          ))}
+          {venues.combos.map((combo) => (
+            <option key={combo} value={combo}>
+              {combo.split("|").map((name) => name.toUpperCase()).join(" – ")}
+            </option>
+          ))}
+        </select>
         <input placeholder="поиск монеты" value={search} onChange={(event) => setSearch(event.target.value)} spellCheck={false} />
       </div>
       {(error || summary?.error) && <p className="level-warning empty">{error ?? summary?.error}</p>}
@@ -152,8 +178,8 @@ export function PairsScreen({ token, summary }: { token: string; summary: Instru
                 <th className="left sortable" onClick={() => setSort("token")}>
                   МОНЕТА{sort === "token" ? " ↑" : ""}
                 </th>
-                <th className="left">BINANCE</th>
-                <th className="left">MEXC</th>
+                <th className="left">НОГА 1</th>
+                <th className="left">НОГА 2</th>
                 <th>ЦЕНА/ТОКЕН</th>
                 <th>ШАГ, ТОК.</th>
                 <th>МИН., ТОК.</th>
@@ -172,12 +198,10 @@ export function PairsScreen({ token, summary }: { token: string; summary: Instru
                 <tr key={pair.key} className={pair.tradable ? "" : "muted"}>
                   <td className="left strong">{pair.token}</td>
                   <td className="left">
-                    <LegLink leg={pair.a} />
-                    {hasMultiplier(pair.a) && <span className="muted"> ×{multiplier(pair.a.price_unit_tokens)}</span>}
+                    <LegCell leg={pair.a} />
                   </td>
                   <td className="left">
-                    <LegLink leg={pair.b} />
-                    <span className="muted"> конт. {compact(pair.b.qty_unit_tokens)}</span>
+                    <LegCell leg={pair.b} />
                   </td>
                   <td>{price(pair.a.price_per_token)}</td>
                   <td>{pair.common_step_tokens}</td>
@@ -211,6 +235,19 @@ export function PairsScreen({ token, summary }: { token: string; summary: Instru
         </div>
       )}
     </div>
+  );
+}
+
+function LegCell({ leg }: { leg: PairLeg }) {
+  const contract = Number(leg.qty_unit_tokens);
+  const unit = Number(leg.price_unit_tokens);
+  return (
+    <>
+      <span className="muted">{leg.exchange.toUpperCase()} </span>
+      <LegLink leg={leg} />
+      {hasMultiplier(leg) && <span className="muted"> ×{multiplier(leg.price_unit_tokens)}</span>}
+      {contract !== unit && <span className="muted"> конт. {compact(leg.qty_unit_tokens)}</span>}
+    </>
   );
 }
 
