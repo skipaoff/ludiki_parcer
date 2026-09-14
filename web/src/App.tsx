@@ -148,10 +148,43 @@ function SettingsScreen({ token, snapshot, now }: { token: string; snapshot: Sna
       <ExchangesSettings token={token} live={snapshot?.exchanges} />
       <section>
         <h2>Торговля</h2>
-        <p className="muted">
-          Размер на ногу и порог ленты сейчас задаются в config.toml, раздел [feed]. Редактирование здесь с историей изменений,
-          плечо и риск-лимиты — этап 6.
-        </p>
+        {snapshot?.trading ? (
+          <>
+            <div className="row">
+              <span>торговля</span>
+              <span className="strong">{snapshot.trading.enabled ? "ВКЛЮЧЕНА" : "выключена"}</span>
+            </div>
+            {Object.entries(snapshot.trading.settings).map(([key, value]) => (
+              <div className="row" key={key}>
+                <span>{key}</span>
+                <span>{typeof value === "object" ? JSON.stringify(value) : String(value)}</span>
+              </div>
+            ))}
+            <div className="row">
+              <span>плечо и маржа выставлены для контрактов</span>
+              <span>{snapshot.trading.warmed}</span>
+            </div>
+            <div className="row">
+              <span>приватные потоки</span>
+              <span>
+                {Object.entries(snapshot.trading.private_streams ?? {})
+                  .map(([name, on]) => `${name.toUpperCase()} ${on ? "на связи" : "нет"}`)
+                  .join(" · ")}
+              </span>
+            </div>
+            {snapshot.trading.warm_errors.map((error) => (
+              <p key={`${error.exchange}${error.symbol}`} className="level-warning">
+                {error.exchange.toUpperCase()} {error.symbol}: {error.error}
+              </p>
+            ))}
+            <p className="muted">
+              Включение, плечо и риск-лимиты задаются в config.toml, раздел [trading], и применяются после перезапуска. Размер на ногу
+              и порог ленты меняются над лентой.
+            </p>
+          </>
+        ) : (
+          <p className="muted">загрузка…</p>
+        )}
       </section>
       <section>
         <h2>Фильтры</h2>

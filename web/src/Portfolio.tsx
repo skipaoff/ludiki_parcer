@@ -1,12 +1,13 @@
 // VFP: The open-pairs column — a card per pair with exit spread, PnL now and liquidation distance, foreign positions and the accounts behind them.
 // Changes when: what an open pair shows, or the read-only actions on it, change (PLAN.md, sections 3.1 and 10).
 // Anti-goal:
-// 1. Close buttons that pretend to work — closing sends orders and arrives with stage 6.
+// 1. Order buttons active while trading is disabled — they stay disabled with the reason.
 // 2. Red for anything but emergencies — only a lost leg or a near liquidation is red.
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { compact } from "./Pairs";
 import { apiSend } from "./session";
+import { explainFailure, tradingAction } from "./trading";
 import type { PortfolioView, PositionView, Snapshot, TradeCard } from "./types";
 
 const ISSUE_TEXT: Record<string, string> = {
@@ -46,6 +47,18 @@ export function PortfolioColumn({ token, snapshot }: { token: string; snapshot: 
   const [busy, setBusy] = useState(false);
   const now = Date.now();
   const keyed = (snapshot?.exchanges ?? []).filter((exchange) => exchange.keys !== "none");
+  const trading = snapshot?.trading?.enabled ?? false;
+  const openPairs = snapshot?.pairs.open ?? 0;
+
+  useEffect(() => {
+    if (openPairs === 0) return;
+    const warn = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+      event.returnValue = "";
+    };
+    window.addEventListener("beforeunload", warn);
+    return () => window.removeEventListener("beforeunload", warn);
+  }, [openPairs]);
 
   const act = async (action: () => Promise<unknown>) => {
     setBusy(true);
@@ -53,7 +66,7 @@ export function PortfolioColumn({ token, snapshot }: { token: string; snapshot: 
     try {
       await action();
     } catch (reason) {
-      setMessage((reason as Error).message);
+      setMessage(explainFailure(reason));
     } finally {
       setBusy(false);
     }
@@ -66,7 +79,20 @@ export function PortfolioColumn({ token, snapshot }: { token: string; snapshot: 
           ОТКРЫТЫЕ ПАРЫ {snapshot?.pairs.open ?? 0}/{snapshot?.pairs.limit ?? 0}
           {snapshot?.pairs.sleep_blocked ? <span className="muted"> · сон Windows запрещён</span> : null}
         </span>
-        <button className="action" disabled title="Закрытие пар появится на этапе 6">
+        <button
+          className="action"
+          disabled={busy || !trading || !(portfolio?.trades.some((trade) => trade.status === "open") ?? false)}
+          title={trading ? "закрыть все открытые пары рыночными ордерами" : "торговля выключена"}
+          onClick={() => {
+            if (window.confirm("Закрыть все открытые пары рыночными ордерами?")) {
+              void act(async () => {
+                const result = await tradingAction<{ closed: string[]; failed: Record<string, string> }>("/api/trading/close-all", token);
+                const failed = Object.values(result.failed);
+                if (failed.length) throw new Error(failed.map((text) => explainFailure(new Error(text))).join("; "));
+              });
+            }
+          }}
+        >
           [ЗАКРЫТЬ ВСЁ]
         </button>
       </div>
@@ -77,7 +103,16 @@ export function PortfolioColumn({ token, snapshot }: { token: string; snapshot: 
       )}
 
       {portfolio?.trades.map((trade) => (
-        <PairCard key={trade.id} trade={trade} now={now} busy={busy} onCloseRecord={() => act(() => apiSend("POST", `/api/portfolio/trades/${trade.id}/close-record`, token))} />
+        <PairCard
+          key={trade.id}
+          trade={trade}
+          now={now}
+          busy={busy}
+          trading={trading}
+          onClose={() => act(() => tradingAction("/api/trading/close", token, { trade_id: trade.id }))}
+          onCloseLeg={(side) => act(() => tradingAction("/api/trading/close-leg", token, { trade_id: trade.id, side }))}
+          onCloseRecord={() => act(() => apiSend("POST", `/api/portfolio/trades/${trade.id}/close-record`, token))}
+        />
       ))}
       {keyed.length > 0 && portfolio && portfolio.trades.length === 0 && <p className="empty muted">Открытых пар нет.</p>}
 
@@ -146,11 +181,30 @@ export function PortfolioColumn({ token, snapshot }: { token: string; snapshot: 
   );
 }
 
-function PairCard({ trade, now, busy, onCloseRecord }: { trade: TradeCard; now: number; busy: boolean; onCloseRecord: () => void }) {
+function PairCard({
+  trade,
+  now,
+  busy,
+  trading,
+  onClose,
+  onCloseLeg,
+  onCloseRecord,
+}: {
+  trade: TradeCard;
+  now: number;
+  busy: boolean;
+  trading: boolean;
+  onClose: () => void;
+  onCloseLeg: (side: "long" | "short") => void;
+  onCloseRecord: () => void;
+}) {
   const lost = trade.status === "leg_lost";
   const liqNear = trade.liq_worst_pct != null && Number(trade.liq_worst_pct) < 10;
   const stale = trade.book_age_ms == null || trade.book_age_ms > 5000;
-  const status = lost ? "НОГА ПОТЕРЯНА" : trade.issues.length ? trade.issues.map((issue) => ISSUE_TEXT[issue] ?? issue).join(", ") : stale ? "нет данных" : "открыта";
+  const transitional = trade.status === "opening" ? "ОТКРЫВАЕТСЯ" : trade.status === "closing" ? "закрывается" : null;
+  const status =
+    transitional ??
+    (lost ? "НОГА ПОТЕРЯНА" : trade.issues.length ? trade.issues.map((issue) => ISSUE_TEXT[issue] ?? issue).join(", ") : stale ? "нет данных" : "открыта");
   return (
     <div className={lost ? "pair-card alarm" : "pair-card"}>
       <div className="row-line">
@@ -175,7 +229,39 @@ function PairCard({ trade, now, busy, onCloseRecord }: { trade: TradeCard; now: 
         <span>
           {inTrade(trade.opened_at_ms, now)} в сделке · фандинг {signedUsd(trade.funding_usd)} · {status}
         </span>
-        {lost ? (
+        {!lost && (
+          <button
+            className="action"
+            disabled={busy || !trading || trade.status !== "open"}
+            title={trading ? "закрыть обе ноги рыночными reduce-only ордерами" : "торговля выключена"}
+            onClick={onClose}
+          >
+            [ЗАКРЫТЬ]
+          </button>
+        )}
+      </div>
+      {lost && (
+        <div className="row-line">
+          <span>
+            <button
+              className="action"
+              disabled={busy || !trading}
+              onClick={() => {
+                if (window.confirm(`Закрыть лонг ${trade.token} на ${trade.long.exchange.toUpperCase()} рыночным ордером?`)) onCloseLeg("long");
+              }}
+            >
+              [ЗАКРЫТЬ ЛОНГ]
+            </button>{" "}
+            <button
+              className="action"
+              disabled={busy || !trading}
+              onClick={() => {
+                if (window.confirm(`Закрыть шорт ${trade.token} на ${trade.short.exchange.toUpperCase()} рыночным ордером?`)) onCloseLeg("short");
+              }}
+            >
+              [ЗАКРЫТЬ ШОРТ]
+            </button>
+          </span>
           <button
             className="action"
             disabled={busy}
@@ -185,12 +271,8 @@ function PairCard({ trade, now, busy, onCloseRecord }: { trade: TradeCard; now: 
           >
             [ЗАКРЫТЬ ЗАПИСЬ]
           </button>
-        ) : (
-          <button className="action" disabled title="Закрытие пары появится на этапе 6">
-            [ЗАКРЫТЬ]
-          </button>
-        )}
-      </div>
+        </div>
+      )}
     </div>
   );
 }

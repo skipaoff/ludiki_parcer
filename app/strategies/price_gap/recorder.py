@@ -136,6 +136,15 @@ class EpisodeRecorder:
         if now_ms - opened.last_refresh_ms >= REFRESH_EVERY_MS:
             self._write(opened, record, state, now_ms, ended_ms=None, reason=None)
 
+    def mark_opened(self, episode_key: str, record: PairRecord, state: EpisodeState, trade_id: int, now_ms: int) -> None:
+        """The user opened this gap; the row now points to its trade (submitted after the trade row)."""
+        opened = self._open.get(episode_key)
+        if opened is None:
+            return
+        opened.extra["opened"] = True
+        opened.extra["trade_id"] = trade_id
+        self._write(opened, record, state, now_ms, ended_ms=None, reason=None)
+
     def left_feed(self, episode_key: str, now_ms: int) -> None:
         opened = self._open.get(episode_key)
         if opened is not None and opened.left_feed_ms is None:
@@ -181,8 +190,8 @@ class EpisodeRecorder:
                 "volume24h_short_usd": volume_short,
                 "index_diff_pct": assessment.index_gap_pct,
                 "suspicious": record.suspicious,
-                "opened": False,
-                "trade_id": None,
+                "opened": opened.extra.get("opened", False),
+                "trade_id": opened.extra.get("trade_id"),
                 "missed_pnl_best_pct": state.missed_pnl_best_pct,
                 "missed_best_exit_at": _ts(state.missed_best_exit_ms),
                 "samples_count": opened.samples,

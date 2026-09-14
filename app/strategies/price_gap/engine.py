@@ -450,6 +450,22 @@ class PriceGapEngine:
     def view(self) -> dict[str, Any]:
         return self._view
 
+    def episode_state(self, episode_key: str | None) -> EpisodeState | None:
+        return None if episode_key is None else self._episodes.get(episode_key)
+
+    def current_quote(self, pair_key: str) -> tuple[PairRecord, _Quote, str | None] | None:
+        """The latest book measurement of a pair and the key of its live gap in that direction, if any."""
+        record, quote = self._records.get(pair_key), self._quotes.get(pair_key)
+        if record is None or quote is None or quote.long is None:
+            return None
+        episode_key = f"{pair_key}>{quote.long.exchange}"
+        return record, quote, episode_key if episode_key in self._episodes else None
+
+    @property
+    def quote_max_age_ms(self) -> int:
+        """A quote older than a few ticks is not a basis for sending orders."""
+        return self._settings.tick_ms * 3
+
     def settings(self) -> FeedSettings:
         return self._settings
 

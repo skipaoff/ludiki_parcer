@@ -17,11 +17,12 @@ from typing import Any, Mapping
 import ccxt.async_support as ccxt
 
 from app.core.account import AccountFacts, KeyPermissions, clock_offset_ms
+from app.core.legs import OrderOutcome
 from app.core.pairs import Quote
 from app.core.schemas import Instrument, LegSide
 from app.core.symbols import parse_symbol
-from app.exchanges.base import Balance, ClockProbe, Position
-from app.exchanges.ccxt_support import now_ms, parse, step, to_bool
+from app.exchanges.base import Balance, ClockProbe, FillReport, OrderReport, Position
+from app.exchanges.ccxt_support import describe_error, error_code, is_unknown_outcome_error, now_ms, parse, step, to_bool
 
 FEE_REFERENCE_SYMBOL = "BTCUSDT"
 
@@ -154,6 +155,66 @@ def parse_funding(raw: list[dict[str, Any]], since_ms: int) -> Decimal:
     )
 
 
+ORDER_SIDES = {(LegSide.LONG, True): "BUY", (LegSide.SHORT, True): "SELL", (LegSide.LONG, False): "SELL", (LegSide.SHORT, False): "BUY"}
+FINAL_WITHOUT_FULL_FILL = {"EXPIRED", "CANCELED", "REJECTED", "EXPIRED_IN_MATCH"}
+
+
+def units_text(value: Decimal) -> str:
+    return format(value.normalize(), "f")
+
+
+def parse_order(
+    raw: dict[str, Any],
+    instrument: Instrument,
+    client_order_id: str,
+    requested_tokens: Decimal,
+    sent_ms: int,
+    ack_ms: int | None,
+) -> OrderReport:
+    """POST /fapi/v1/order with newOrderRespType=RESULT, or GET /fapi/v1/order: status, executedQty, avgPrice."""
+    status = str(raw.get("status") or "")
+    filled = Decimal(str(raw.get("executedQty") or "0")) * instrument.qty_unit_tokens
+    average = _positive(raw.get("avgPrice"))
+    if status == "FILLED":
+        outcome = OrderOutcome.FILLED if filled >= requested_tokens else OrderOutcome.PARTIAL
+    elif status in FINAL_WITHOUT_FULL_FILL:
+        outcome = OrderOutcome.PARTIAL if filled > 0 else OrderOutcome.REJECTED
+    else:
+        # NEW or PARTIALLY_FILLED: a market order still working has no final result yet.
+        outcome = OrderOutcome.UNKNOWN
+    return OrderReport(
+        client_order_id=client_order_id,
+        exchange_order_id=str(raw["orderId"]) if raw.get("orderId") is not None else None,
+        outcome=outcome,
+        status=status,
+        requested_tokens=requested_tokens,
+        filled_tokens=filled,
+        avg_price=average / instrument.price_unit_tokens if average else None,
+        fee_usd=None,
+        error_code=None,
+        error_message=None,
+        sent_ts_ms=sent_ms,
+        ack_ts_ms=ack_ms,
+        response=raw,
+    )
+
+
+def parse_fills(raw: list[dict[str, Any]], instrument: Instrument) -> list[FillReport]:
+    """GET /fapi/v1/userTrades?orderId= — commission may be reported negative; stored as a positive cost."""
+    return [
+        FillReport(
+            exchange_fill_id=str(item["id"]),
+            ts_ms=int(item["time"]),
+            price=Decimal(str(item["price"])) / instrument.price_unit_tokens,
+            qty_tokens=Decimal(str(item["qty"])) * instrument.qty_unit_tokens,
+            fee=abs(Decimal(str(item.get("commission") or "0"))),
+            fee_asset=str(item.get("commissionAsset") or ""),
+            is_maker=to_bool(item.get("maker")),
+        )
+        for item in raw
+    ]
+
+
 def parse_permissions(raw: dict[str, Any]) -> KeyPermissions:
     """GET /sapi/v1/account/apiRestrictions."""
     return KeyPermissions(
@@ -235,6 +296,75 @@ class BinanceAdapter:
             {"symbol": symbol_raw, "incomeType": "FUNDING_FEE", "startTime": since_ms, "limit": 1000}
         )
         return parse_funding(raw, since_ms)
+
+    async def create_listen_key(self) -> str:
+        """POST /fapi/v1/listenKey — the user data stream address, valid 60 minutes unless kept alive."""
+        return (await self._client.fapiprivate_post_listenkey())["listenKey"]
+
+    async def keepalive_listen_key(self) -> None:
+        await self._client.fapiprivate_put_listenkey()
+
+    async def prepare_symbol(self, instrument: Instrument, leverage: int, isolated: bool) -> None:
+        await self._client.fapiprivate_post_leverage({"symbol": instrument.symbol_raw, "leverage": leverage})
+        try:
+            await self._client.fapiprivate_post_margintype(
+                {"symbol": instrument.symbol_raw, "marginType": "ISOLATED" if isolated else "CROSSED"}
+            )
+        except Exception as exc:
+            # -4046: "No need to change margin type" — it already is what we want.
+            if "-4046" not in str(exc):
+                raise
+
+    async def place_market_order(
+        self,
+        instrument: Instrument,
+        leg: LegSide,
+        opening: bool,
+        qty_units: Decimal,
+        client_order_id: str,
+        leverage: int,
+        isolated: bool,
+    ) -> OrderReport:
+        requested = qty_units * instrument.qty_unit_tokens
+        params = {
+            "symbol": instrument.symbol_raw,
+            "side": ORDER_SIDES[(leg, opening)],
+            "type": "MARKET",
+            "quantity": units_text(qty_units),
+            "newClientOrderId": client_order_id,
+            "newOrderRespType": "RESULT",
+        }
+        if not opening:
+            params["reduceOnly"] = "true"
+        sent = int(now_ms())
+        try:
+            raw = await self._client.fapiprivate_post_order(params)
+        except Exception as exc:
+            unknown = is_unknown_outcome_error(exc)
+            return OrderReport(
+                client_order_id, None, OrderOutcome.UNKNOWN if unknown else OrderOutcome.REJECTED, "error", requested,
+                Decimal(0), None, None, error_code(exc), describe_error("order", exc), sent, None if unknown else int(now_ms()),
+            )
+        return parse_order(raw, instrument, client_order_id, requested, sent, int(now_ms()))
+
+    async def fetch_order(self, instrument: Instrument, client_order_id: str, requested_tokens: Decimal) -> OrderReport:
+        sent = int(now_ms())
+        try:
+            raw = await self._client.fapiprivate_get_order({"symbol": instrument.symbol_raw, "origClientOrderId": client_order_id})
+        except Exception as exc:
+            # -2013 "Order does not exist": the exchange never accepted it.
+            missing = "-2013" in str(exc)
+            return OrderReport(
+                client_order_id, None, OrderOutcome.REJECTED if missing else OrderOutcome.UNKNOWN, "not_found" if missing else "error",
+                requested_tokens, Decimal(0), None, None, error_code(exc), describe_error("order_status", exc), sent, None,
+            )
+        return parse_order(raw, instrument, client_order_id, requested_tokens, sent, int(now_ms()))
+
+    async def fetch_fills(self, instrument: Instrument, report: OrderReport) -> list[FillReport]:
+        if report.exchange_order_id is None:
+            return []
+        raw = await self._client.fapiprivate_get_usertrades({"symbol": instrument.symbol_raw, "orderId": report.exchange_order_id})
+        return parse_fills(raw, instrument)
 
     async def probe_clock(self) -> ClockProbe:
         sent = now_ms()

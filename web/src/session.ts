@@ -41,8 +41,9 @@ export async function apiSend<T>(method: string, path: string, token: string, bo
   if (!response.ok) {
     let detail = `${response.status}`;
     try {
-      const data = (await response.json()) as { detail?: string };
-      if (data.detail) detail = data.detail;
+      const data = (await response.json()) as { detail?: unknown };
+      if (typeof data.detail === "string") detail = data.detail;
+      else if (data.detail) detail = JSON.stringify(data.detail);
     } catch {
       // not JSON
     }

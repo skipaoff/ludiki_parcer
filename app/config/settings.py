@@ -117,7 +117,24 @@ class PortfolioSettings(_Section):
     balances_poll_s: float = Field(default=60, ge=10)
     funding_poll_s: float = Field(default=300, ge=60)
     liquidation_warning_pct: Decimal = Field(default=Decimal("10"), gt=0)
-    max_open_pairs: int = Field(default=3, ge=1)
+
+
+class TradingSettings(_Section):
+    enabled: bool = False
+    leverage_binance: int = Field(default=3, ge=1, le=50)
+    leverage_mexc: int = Field(default=3, ge=1, le=50)
+    isolated: bool = True
+    entry_min_roi_pct: Decimal = Decimal("0.50")
+    max_open_pairs: int = Field(default=3, ge=1, le=50)
+    max_total_usd: Decimal = Field(default=Decimal("5000"), gt=0)
+    one_pair_per_token: bool = True
+    margin_buffer_pct: Decimal = Field(default=Decimal("20"), ge=0)
+    status_query_attempts: int = Field(default=10, ge=1)
+    status_query_interval_ms: int = Field(default=1000, ge=100)
+    close_attempts: int = Field(default=3, ge=1)
+    close_retry_pause_ms: int = Field(default=300, ge=0)
+    maintenance_block_s: int = Field(default=60, ge=1)
+    warmup_retry_s: int = Field(default=60, ge=5)
 
 
 class LoggingSettings(_Section):
@@ -134,6 +151,7 @@ class Settings(_Section):
     instruments: InstrumentsSettings = InstrumentsSettings()
     feed: FeedSettings = FeedSettings()
     portfolio: PortfolioSettings = PortfolioSettings()
+    trading: TradingSettings = TradingSettings()
     logging: LoggingSettings = LoggingSettings()
 
 

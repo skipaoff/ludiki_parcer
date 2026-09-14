@@ -89,6 +89,43 @@ def estimated_entry_fees_usd(qty: Decimal, entry_long: Decimal, entry_short: Dec
 
 
 @dataclass(frozen=True, slots=True)
+class Settlement:
+    exit_spread_pct: Decimal
+    pnl_gross_usd: Decimal
+    pnl_net_usd: Decimal
+    pnl_net_pct: Decimal
+
+
+def settle(
+    qty_tokens: Decimal,
+    entry_long: Decimal,
+    entry_short: Decimal,
+    exit_long: Decimal,
+    exit_short: Decimal,
+    fees_usd: Decimal,
+    funding_usd: Decimal,
+) -> Settlement:
+    """Realized result of a closed pair: price moves of both legs, minus all fees, plus funding; percent of the long notional."""
+    gross = qty_tokens * (exit_long - entry_long) + qty_tokens * (entry_short - exit_short)
+    net = gross - fees_usd + funding_usd
+    notional = qty_tokens * entry_long
+    return Settlement(
+        exit_spread_pct=(exit_short - exit_long) / exit_long * 100,
+        pnl_gross_usd=gross,
+        pnl_net_usd=net,
+        pnl_net_pct=net / notional * 100 if notional else Decimal(0),
+    )
+
+
+def weighted_price(parts: list[tuple[Decimal, Decimal]]) -> Decimal | None:
+    """Average price of several executions given as (quantity, price)."""
+    quantity = sum((qty for qty, _ in parts), Decimal(0))
+    if quantity <= 0:
+        return None
+    return sum((qty * price for qty, price in parts), Decimal(0)) / quantity
+
+
+@dataclass(frozen=True, slots=True)
 class PairMetrics:
     entry_spread_pct: Decimal
     exit_spread_pct: Decimal | None

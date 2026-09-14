@@ -14,9 +14,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from decimal import Decimal
-from typing import AsyncIterator, Mapping, Protocol
+from typing import Any, AsyncIterator, Mapping, Protocol
 
 from app.core.account import AccountFacts
+from app.core.legs import OrderOutcome
 from app.core.pairs import Quote
 from app.core.schemas import Book, Instrument, LegSide
 
@@ -74,15 +75,35 @@ class Balance:
 
 @dataclass(frozen=True, slots=True)
 class OrderReport:
+    """
+    What the exchange said about one market order, per token. outcome is the terminal's reading of it:
+    unknown means the order may or may not exist and its status must be queried before anything else.
+    """
+
     client_order_id: str
     exchange_order_id: str | None
+    outcome: OrderOutcome
     status: str
+    requested_tokens: Decimal
     filled_tokens: Decimal
     avg_price: Decimal | None
     fee_usd: Decimal | None
     error_code: str | None
+    error_message: str | None
     sent_ts_ms: int
     ack_ts_ms: int | None
+    response: dict[str, Any] | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class FillReport:
+    exchange_fill_id: str
+    ts_ms: int
+    price: Decimal
+    qty_tokens: Decimal
+    fee: Decimal
+    fee_asset: str
+    is_maker: bool | None
 
 
 class ExchangeAdapter(Protocol):
@@ -114,18 +135,33 @@ class ExchangeAdapter(Protocol):
 
     async def fetch_volume_24h_usd(self) -> dict[str, Decimal]: ...
 
-    async def prepare_symbol(self, symbol_raw: str, leverage: int, isolated: bool) -> None: ...
+    async def prepare_symbol(self, instrument: Instrument, leverage: int, isolated: bool) -> None:
+        """Needs keys. Set leverage and margin mode for a contract; already-set values are not an error."""
+        ...
 
     async def place_market_order(
         self,
-        symbol_raw: str,
-        side: LegSide,
+        instrument: Instrument,
+        leg: LegSide,
+        opening: bool,
         qty_units: Decimal,
-        reduce_only: bool,
         client_order_id: str,
-    ) -> OrderReport: ...
+        leverage: int,
+        isolated: bool,
+    ) -> OrderReport:
+        """
+        Needs keys. Opening buys a long or sells a short; closing is reduce-only in the opposite direction.
+        Never raises for exchange or network errors — they come back as a rejected or unknown outcome.
+        """
+        ...
 
-    async def fetch_order(self, symbol_raw: str, client_order_id: str) -> OrderReport: ...
+    async def fetch_order(self, instrument: Instrument, client_order_id: str, requested_tokens: Decimal) -> OrderReport:
+        """Needs keys. Current state of an order by the terminal's own id; an order the exchange never saw is rejected."""
+        ...
+
+    async def fetch_fills(self, instrument: Instrument, report: OrderReport) -> list[FillReport]:
+        """Needs keys. Executions of a filled order with their fees."""
+        ...
 
     async def fetch_positions(self, instruments: Mapping[str, Instrument]) -> list[Position]:
         """Needs keys. Non-zero positions of contracts found in instruments (keyed by raw symbol), per token."""

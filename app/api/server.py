@@ -26,6 +26,8 @@ from app.api.hub import Hub
 from app.config.settings import ServerSettings
 from app.exchanges.service import ExchangeService, InvalidKeys, UnknownExchange
 from app.instruments.service import InstrumentService, UnknownPair
+from app.core.schemas import LegSide
+from app.execution.service import ExecutionService, TradingError
 from app.portfolio.service import PortfolioError, PortfolioService
 from app.strategies.price_gap.settings import FeedSettingsService, InvalidSetting
 
@@ -59,6 +61,7 @@ class ApiContext:
     feed_settings: FeedSettingsService | None = None
     history: HistoryQueries | None = None
     portfolio: PortfolioService | None = None
+    execution: ExecutionService | None = None
 
 
 def allowed_origins(server: ServerSettings) -> frozenset[str]:
@@ -216,6 +219,61 @@ def create_app(server: ServerSettings, web_dist: Path, context: ApiContext) -> F
             return await portfolio().close_record(trade_id)
         except PortfolioError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from None
+
+    def execution() -> ExecutionService:
+        if context.execution is None:
+            raise HTTPException(status_code=503, detail="trading is not available")
+        return context.execution
+
+    async def json_body(request: Request) -> dict[str, Any]:
+        try:
+            body = orjson.loads(await request.body())
+        except orjson.JSONDecodeError:
+            raise HTTPException(status_code=400, detail="expected a JSON object") from None
+        if not isinstance(body, dict):
+            raise HTTPException(status_code=400, detail="expected a JSON object")
+        return body
+
+    async def trading_call(call: Awaitable[Any]) -> Any:
+        try:
+            return await call
+        except TradingError as exc:
+            raise HTTPException(status_code=409, detail={"reasons": exc.reasons}) from None
+
+    @app.get("/api/trading/status", dependencies=[Depends(require_token)])
+    async def trading_status() -> dict[str, Any]:
+        return execution().status()
+
+    @app.post("/api/trading/open", dependencies=[Depends(require_token)])
+    async def trading_open(request: Request) -> dict[str, Any]:
+        body = await json_body(request)
+        if not isinstance(body.get("pair_key"), str):
+            raise HTTPException(status_code=400, detail="expected pair_key")
+        return await trading_call(execution().open_pair(body["pair_key"]))
+
+    @app.post("/api/trading/close", dependencies=[Depends(require_token)])
+    async def trading_close(request: Request) -> dict[str, Any]:
+        body = await json_body(request)
+        try:
+            trade_id = int(body["trade_id"])
+        except (KeyError, TypeError, ValueError):
+            raise HTTPException(status_code=400, detail="expected trade_id") from None
+        return await trading_call(execution().close_pair(trade_id))
+
+    @app.post("/api/trading/close-leg", dependencies=[Depends(require_token)])
+    async def trading_close_leg(request: Request) -> dict[str, Any]:
+        body = await json_body(request)
+        try:
+            trade_id, side = int(body["trade_id"]), LegSide(body["side"])
+        except (KeyError, TypeError, ValueError):
+            raise HTTPException(status_code=400, detail="expected trade_id and side long|short") from None
+        return await trading_call(execution().close_leg(trade_id, side))
+
+    @app.post("/api/trading/close-all", dependencies=[Depends(require_token)])
+    async def trading_close_all() -> dict[str, Any]:
+        if not execution().status()["enabled"]:
+            raise HTTPException(status_code=409, detail={"reasons": ["trading_disabled"]})
+        return await execution().close_all()
 
     @app.get("/api/feed/settings", dependencies=[Depends(require_token)])
     async def get_feed_settings() -> dict[str, str]:

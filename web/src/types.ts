@@ -133,6 +133,17 @@ export interface FeedRow {
   suspicious: boolean;
   blacklisted: boolean;
   block: string | null;
+  open_blocks?: string[];
+}
+
+export interface TradingStatus {
+  enabled: boolean;
+  busy: string[];
+  warmed: number;
+  warm_errors: { exchange: string; symbol: string; error: string }[];
+  blocked: Record<string, string>;
+  private_streams?: Record<string, boolean>;
+  settings: Record<string, unknown>;
 }
 
 export interface FeedView {
@@ -184,6 +195,7 @@ export interface PortfolioView {
 export interface Snapshot {
   app: { version: string; started_ts_ms: number };
   portfolio?: PortfolioView;
+  trading?: TradingStatus;
   instruments?: InstrumentsSummary;
   feed?: FeedView;
   history?: { recorded: number; open: number; radar_snapshots: number };

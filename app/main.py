@@ -35,6 +35,8 @@ from app.market.binance_streams import BinanceStreams
 from app.market.mexc_market import MexcMarket
 from app.market.state import MarketState
 from app.market.radar_recorder import RadarRecorder
+from app.execution.service import ExecutionService
+from app.market.private_streams import OrderEvents, PrivateStreams
 from app.portfolio.service import PortfolioService
 from app.system.keep_awake import KeepAwake
 from app.storage import history as history_queries
@@ -126,6 +128,10 @@ async def _serve(
         }
 
     keep_awake = KeepAwake()
+    portfolio_settings = settings.portfolio
+    if settings.trading.enabled:
+        # Margin checks before an order rely on balances; keep them fresh while trading is on.
+        portfolio_settings = portfolio_settings.model_copy(update={"balances_poll_s": min(portfolio_settings.balances_poll_s, 15)})
 
     def on_active_pairs(active: bool) -> None:
         if active:
@@ -140,7 +146,7 @@ async def _serve(
         database,
         writer.submit,
         journal,
-        settings.portfolio,
+        portfolio_settings,
         taker_fee_pct,
         on_active_change=on_active_pairs,
     )
@@ -158,6 +164,26 @@ async def _serve(
     )
     feed_settings = FeedSettingsService(engine, database, journal)
     radar_recorder = RadarRecorder(instruments, market, writer.submit)
+    order_events = OrderEvents()
+    execution = ExecutionService(
+        settings.trading,
+        lambda: engine.settings().size_usd,
+        exchanges,
+        engine,
+        portfolio,
+        recorder,
+        writer.submit,
+        journal,
+        taker_fee_pct,
+        balance_max_age_ms=portfolio_settings.balances_poll_s * 2_000 + 5_000,
+        order_events=order_events,
+    )
+    private_streams = PrivateStreams(
+        exchanges.adapter,
+        order_events,
+        portfolio.poke,
+        lambda: [item["name"] for item in exchanges.snapshot() if item["keys"] in ("ok", "warning")],
+    )
 
     class History:
         async def summary(self, hours: int) -> dict[str, Any]:
@@ -181,9 +207,14 @@ async def _serve(
             },
             "exchanges": exchanges.snapshot(),
             "instruments": instruments.summary(),
-            "feed": {**engine.view(), "streams": {"binance": binance_streams.stats(), "mexc": mexc_market.stats()}},
+            "feed": {
+                **engine.view(),
+                "rows": execution.annotate(engine.view()["rows"]),
+                "streams": {"binance": binance_streams.stats(), "mexc": mexc_market.stats()},
+            },
+            "trading": {**execution.status(), "private_streams": private_streams.connected, "order_events": order_events.received},
             "history": {"recorded": recorder.recorded, "open": recorder.open_count, "radar_snapshots": radar_recorder.snapshots},
-            "pairs": {"open": portfolio.open_count, "limit": settings.portfolio.max_open_pairs, "sleep_blocked": keep_awake.held},
+            "pairs": {"open": portfolio.open_count, "limit": settings.trading.max_open_pairs, "sleep_blocked": keep_awake.held},
             "portfolio": portfolio.snapshot(),
         }
 
@@ -212,6 +243,7 @@ async def _serve(
         feed_settings=feed_settings,
         history=History(),
         portfolio=portfolio,
+        execution=execution,
     )
     app = create_app(settings.server, settings.paths.web_dist, context)
     server = _Server(
@@ -248,6 +280,8 @@ async def _serve(
         asyncio.create_task(portfolio.run_balances()),
         asyncio.create_task(portfolio.run_funding()),
         asyncio.create_task(portfolio.run_metrics()),
+        asyncio.create_task(execution.run_warmup()),
+        asyncio.create_task(private_streams.run()),
     ]
     server_task = asyncio.create_task(server.serve())
     try:
@@ -263,6 +297,8 @@ async def _serve(
         # asyncio.wait, not await: cancelling the main task must not cancel the server mid-request.
         await asyncio.wait({server_task})
     finally:
+        if portfolio.open_count:
+            journal.emit(Level.CRITICAL, "app", "stopped_with_open_pairs", pairs=portfolio.open_count)
         journal.emit(Level.INFO, "app", "stopped")
         server.should_exit = True
         with contextlib.suppress(Exception, asyncio.CancelledError):

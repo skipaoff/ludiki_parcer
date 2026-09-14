@@ -30,6 +30,25 @@ ludik.cmd
 
 Флаги: `--no-browser`, `--config путь\к\config.toml`. Настройки по умолчанию — `config.example.toml`; чтобы поменять, скопируйте его в `config.toml`.
 
+## Торговля
+
+Торговля выключена, пока в `config.toml` не стоит `[trading] enabled = true`. Порядок включения:
+
+1. Ключи в «Настройки → Биржи», обе проверки приняты (без права вывода, режим позиций one-way).
+2. Исключения HTTPS-сканирования антивируса для `*.binance.com` и `*.mexc.com`.
+3. Пробная сделка на каждой бирже: открывает и сразу закрывает минимальную позицию, ответы сохраняет в `ludik-data/trials`.
+
+```bat
+.venv\Scripts\python.exe scripts\trial_trade.py binance --demo --i-understand
+```
+
+```bat
+.venv\Scripts\python.exe scripts\trial_trade.py mexc --i-understand
+```
+
+4. `enabled = true`, плечо и лимиты в разделе `[trading]`, перезапуск `ludik.cmd`.
+5. Первая пара — на минимальном размере над лентой; сверка цен, комиссий и PnL с биржами.
+
 ## Окружение (Windows 11)
 
 Нужно один раз:

@@ -46,6 +46,37 @@ def parse(errors: list[str], name: str, parser: Callable[[Any], T], raw: Any) ->
         return None
 
 
+def is_unknown_outcome_error(exc: BaseException) -> bool:
+    """
+    Errors after which an order may exist on the exchange: timeouts and dropped connections.
+    Anything the exchange answered with an error code means the order was not accepted.
+    """
+    import ccxt
+
+    # Maintenance, rate limiting and timestamp errors are refusals: the request was not executed.
+    if isinstance(exc, (ccxt.OnMaintenance, ccxt.DDoSProtection, ccxt.InvalidNonce)):
+        return False
+    # Binance -1007 ("execution status unknown") arrives as RequestTimeout, a NetworkError.
+    return isinstance(exc, (ccxt.NetworkError, TimeoutError, OSError))
+
+
+def is_maintenance_error(exc: BaseException) -> bool:
+    import ccxt
+
+    return isinstance(exc, ccxt.OnMaintenance) or "maintenance" in str(exc).lower()
+
+
+def error_code(exc: BaseException) -> str:
+    text = str(exc)
+    for marker in ('"code":', "'code':", "code "):
+        index = text.find(marker)
+        if index >= 0:
+            fragment = text[index + len(marker) :].strip().lstrip('"').split(",")[0].split("}")[0].strip('" ')
+            if fragment:
+                return fragment[:20]
+    return type(exc).__name__
+
+
 def to_bool(value: Any) -> bool | None:
     if isinstance(value, bool):
         return value

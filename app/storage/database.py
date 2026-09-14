@@ -42,7 +42,19 @@ UPSERT_KEYS: dict[str, tuple[str, ...]] = {
     "opportunity_episodes": ("id",),
     "trades": ("id",),
     "orders": ("id",),
+    "fills": ("order_id", "exchange_fill_id"),
 }
+
+
+def consecutive_groups(rows: list[tuple[str, dict[str, Any]]]) -> list[tuple[str, tuple[str, ...], list[dict[str, Any]]]]:
+    groups: list[tuple[str, tuple[str, ...], list[dict[str, Any]]]] = []
+    for table, row in rows:
+        columns = tuple(row)
+        if groups and groups[-1][0] == table and groups[-1][1] == columns:
+            groups[-1][2].append(row)
+        else:
+            groups.append((table, columns, [row]))
+    return groups
 
 
 def upsert_tail(keys: tuple[str, ...], columns: tuple[str, ...]) -> str:
@@ -136,16 +148,14 @@ class Database:
 
     async def insert_batch(self, rows: list[tuple[str, dict[str, Any]]]) -> None:
         """
-        Insert rows of any tables in one transaction, one verified statement per table and column set, in the order
-        each group first appeared (a parent row submitted before its children is stored before them).
-        Tables in UPSERT_KEYS are upserted; several versions of one row in a batch collapse to the newest.
+        Insert rows of any tables in one transaction, strictly in submission order: consecutive rows of the same table
+        and column set share one verified statement. Order matters for foreign keys — a trade before its orders,
+        an episode before its samples, and an episode's "opened" update after the trade it points to.
+        Tables in UPSERT_KEYS are upserted; several versions of one row within a statement collapse to the newest.
         """
-        groups: dict[tuple[str, tuple[str, ...]], list[dict[str, Any]]] = {}
-        for table, row in rows:
-            groups.setdefault((table, tuple(row)), []).append(row)
         async with self.pool.acquire() as connection:
             async with connection.transaction():
-                for (table, columns), group in groups.items():
+                for table, columns, group in consecutive_groups(rows):
                     keys = UPSERT_KEYS.get(table)
                     if keys is None:
                         await bulk_insert(connection, table, group)

@@ -9,6 +9,7 @@ import { useEffect, useMemo, useState } from "react";
 import { compact } from "./Pairs";
 import { PortfolioColumn } from "./Portfolio";
 import { apiSend } from "./session";
+import { explainFailure, reasonText, tradingAction } from "./trading";
 import type { FeedRow, FeedView, Snapshot } from "./types";
 
 type SortKey = "roi" | "capacity" | "age";
@@ -133,8 +134,32 @@ function SettingsForm({ token, sizeUsd, minRoiPct }: { token: string; sizeUsd?: 
   );
 }
 
+function OpenButton({ token, row, onResult }: { token: string; row: FeedRow; onResult: (message: string | null) => void }) {
+  const [sending, setSending] = useState(false);
+  const blocks = row.open_blocks ?? ["trading_disabled"];
+  const blocked = blocks.length > 0 || sending;
+  const open = async () => {
+    setSending(true);
+    onResult(null);
+    try {
+      const card = await tradingAction<{ status: string; token: string }>("/api/trading/open", token, { pair_key: row.key });
+      onResult(`✓ ${card.token}: ${card.status === "open" ? "пара открыта" : `статус ${card.status}`}`);
+    } catch (error) {
+      onResult(`${row.token}: ${explainFailure(error)}`);
+    } finally {
+      setSending(false);
+    }
+  };
+  return (
+    <button className="action" disabled={blocked} title={blocks.map(reasonText).join("; ") || "открыть пару рыночными ордерами"} onClick={() => void open()}>
+      {sending ? "[…]" : "[ОТКРЫТЬ]"}
+    </button>
+  );
+}
+
 export function FeedScreen({ token, snapshot }: { token: string; snapshot: Snapshot | null }) {
   const [filters, setFilters] = useState<Filters>(loadFilters);
+  const [tradeMessage, setTradeMessage] = useState<string | null>(null);
   const feed: FeedView | undefined = snapshot?.feed;
 
   useEffect(() => {
@@ -234,9 +259,7 @@ export function FeedScreen({ token, snapshot }: { token: string; snapshot: Snaps
                   <td>${compact(row.capacity_usd)}</td>
                   <td>{lifetime(row.lifetime_ms)}</td>
                   <td>
-                    <button className="action" disabled title={reason ?? "открытие пар появится на этапе 6"}>
-                      [ОТКРЫТЬ]
-                    </button>
+                    <OpenButton token={token} row={row} onResult={setTradeMessage} />
                   </td>
                 </tr>
               );
@@ -247,6 +270,14 @@ export function FeedScreen({ token, snapshot }: { token: string; snapshot: Snaps
           <p className="empty muted">
             {feed ? "Сейчас нет вилок выше порога. Лучшие текущие спреды — в радаре ниже." : "Лента запускается…"}
           </p>
+        )}
+        {tradeMessage && (
+          <p className={tradeMessage.startsWith("✓") ? "empty" : "empty level-warning"} onClick={() => setTradeMessage(null)}>
+            {tradeMessage}
+          </p>
+        )}
+        {snapshot?.trading && !snapshot.trading.enabled && (
+          <p className="empty muted">Торговля выключена: включается в config.toml, раздел [trading], после пробной сделки.</p>
         )}
 
         <Radar rows={feed?.radar ?? []} />

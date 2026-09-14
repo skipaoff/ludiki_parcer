@@ -62,7 +62,20 @@
 | `GET /fapi/v3/account` | `fapiprivatev3_get_account` | `totalMarginBalance`, `availableBalance`, `totalInitialMargin` |
 | `GET /fapi/v1/income?incomeType=FUNDING_FEE` | `fapiprivate_get_income` | сумма `income` с момента открытия пары |
 
-### Приватная часть (через ccxt) [проверить, этап 6]
+### Ордера (этап 6) [док, проверить пробной сделкой]
+
+| Эндпоинт | Метод ccxt | Что делаем |
+|---|---|---|
+| `POST /fapi/v1/leverage` | `fapiprivate_post_leverage` | плечо по символу |
+| `POST /fapi/v1/marginType` | `fapiprivate_post_margintype` | `ISOLATED`/`CROSSED`; ответ `-4046` («не нужно менять») — не ошибка |
+| `POST /fapi/v1/order` | `fapiprivate_post_order` | `type=MARKET`, `quantity` в единицах контракта, `newClientOrderId`, `reduceOnly=true` на закрытие, `newOrderRespType=RESULT` — в ответе сразу `status`, `executedQty`, `avgPrice` |
+| `GET /fapi/v1/order?origClientOrderId=` | `fapiprivate_get_order` | статус по своему id; `-2013` — ордера нет |
+| `GET /fapi/v1/userTrades?orderId=` | `fapiprivate_get_usertrades` | исполнения: `price`, `qty`, `commission` (может быть отрицательной), `commissionAsset` |
+| `POST /fapi/v1/listenKey`, `PUT` раз в 30 минут | `fapiprivate_post_listenkey`, `fapiprivate_put_listenkey` | user data stream `wss://fstream.binance.com/ws/<listenKey>`: `ORDER_TRADE_UPDATE` (`o.c` — свой id), `ACCOUNT_UPDATE`, `listenKeyExpired` |
+
+Ошибки: таймаут и `-1007` («execution status unknown») — исход неизвестен, ордер ищется по своему id; отказ с кодом — ордер не принят.
+
+### Приватная часть
 
 - Цена ликвидации в потоке `ACCOUNT_UPDATE` не приходит — берётся из REST.
 - Плечо и режим маржи по символу.
@@ -116,6 +129,16 @@
 | `GET /api/v1/private/position/open_positions` | `contract_private_get_position_open_positions` | `holdVol` (контракты), `positionType` 1 лонг / 2 шорт, `holdAvgPrice`, `liquidatePrice`, `leverage`, `openType` 1 изолированная / 2 кросс. Mark цены в ответе нет — берётся `fairPrice` из опроса тикеров |
 | `GET /api/v1/private/account/assets` | `contract_private_get_account_assets` | USDT: `equity`, `availableBalance`, `positionMargin` + `frozenBalance` |
 | `GET /api/v1/private/position/funding_records` | `contract_private_get_position_funding_records` | `resultList[].funding` с `settleTime` не раньше открытия пары, постранично до 20 страниц |
+
+### Ордера (этап 6) [док, проверить пробной сделкой]
+
+| Эндпоинт | Метод ccxt | Что делаем |
+|---|---|---|
+| `POST /api/v1/private/position/change_leverage` | `contract_private_post_position_change_leverage` | без позиции: `symbol`, `leverage`, `openType` 1/2, `positionType` 1 и 2 |
+| `POST /api/v1/private/order/submit` | `contract_private_post_order_submit` | `vol` в контрактах, `side` 1 открыть лонг / 2 закрыть шорт / 3 открыть шорт / 4 закрыть лонг, `type=5` (рыночный), `openType`, `leverage`, `externalOid`; ответ несёт только id ордера |
+| `GET /api/v1/private/order/external/{symbol}/{external_oid}` | `contract_private_get_order_external_symbol_external_oid` | `state` 1 новый / 2 исполняется / 3 исполнен / 4 отменён / 5 недействителен, `dealVol`, `dealAvgPrice`, `takerFee`, `makerFee`. Сразу после отправки статус может ещё не найтись — адаптер опрашивает до 4 раз через 150 мс |
+| `GET /api/v1/private/order/deal_details/{order_id}` | `contract_private_get_order_deal_details_order_id` | исполнения: `vol`, `price`, `fee`, `feeCurrency`, `isTaker` |
+| `wss://contract.mexc.com/edge`, `{"method": "login", "param": {"apiKey", "reqTime", "signature"}}` | — | подпись HMAC-SHA256 от `apiKey + reqTime`; после входа приходят `push.personal.order` (`externalOid`), `push.personal.position`, `push.personal.asset` |
 
 ### Вебсокеты
 

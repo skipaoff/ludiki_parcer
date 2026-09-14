@@ -82,6 +82,18 @@ class Trade:
     closed_at_ms: int | None = None
     close_reason: str | None = None
     settings: dict[str, Any] = field(default_factory=dict)
+    episode_id: int | None = None
+    roi_expected_entry: Decimal | None = None
+    roi_actual_entry: Decimal | None = None
+    exit_long_avg: Decimal | None = None
+    exit_short_avg: Decimal | None = None
+    exit_spread_expected: Decimal | None = None
+    exit_spread_actual: Decimal | None = None
+    pnl_gross_usd: Decimal | None = None
+    pnl_net_usd: Decimal | None = None
+    pnl_net_pct: Decimal | None = None
+    click_to_fill_ms_long: int | None = None
+    click_to_fill_ms_short: int | None = None
     missing_polls: int = 0
     issues: tuple[str, ...] = ()
     liq_warned: bool = False
@@ -95,7 +107,7 @@ class Trade:
         return {
             "id": self.id,
             "strategy": "price_gap",
-            "episode_id": None,
+            "episode_id": self.episode_id,
             "pair_id": self.pair_id,
             "token": self.token,
             "long_exchange": self.long_exchange,
@@ -110,10 +122,22 @@ class Trade:
             "closed_at": _ts(self.closed_at_ms),
             "entry_long_avg": self.entry_long_avg,
             "entry_short_avg": self.entry_short_avg,
-            "roi_actual_entry": entry_spread_pct(self.entry_long_avg, self.entry_short_avg),
+            "roi_expected_entry": self.roi_expected_entry,
+            "roi_actual_entry": self.roi_actual_entry
+            if self.roi_actual_entry is not None
+            else entry_spread_pct(self.entry_long_avg, self.entry_short_avg),
+            "exit_spread_expected": self.exit_spread_expected,
+            "exit_spread_actual": self.exit_spread_actual,
+            "exit_long_avg": self.exit_long_avg,
+            "exit_short_avg": self.exit_short_avg,
             "fees_usd": self.fees_usd,
             "funding_usd": self.funding_usd,
+            "pnl_gross_usd": self.pnl_gross_usd,
+            "pnl_net_usd": self.pnl_net_usd,
+            "pnl_net_pct": self.pnl_net_pct,
             "close_reason": self.close_reason,
+            "click_to_fill_ms_long": self.click_to_fill_ms_long,
+            "click_to_fill_ms_short": self.click_to_fill_ms_short,
             "settings_snapshot": {
                 **self.settings,
                 "legs": {"long_symbol": self.long_symbol, "short_symbol": self.short_symbol},
@@ -126,6 +150,7 @@ class Trade:
 class _ExchangeState:
     positions: list[Position] = field(default_factory=list)
     balance: Balance | None = None
+    balance_ms: float | None = None
     polled_ms: float | None = None
     error: str | None = None
 
@@ -161,6 +186,7 @@ class PortfolioService:
         self._accounts: dict[str, _ExchangeState] = {}
         self._foreign: list[Position] = []
         self._active = False
+        self._poke: asyncio.Event | None = None
 
     # ── catalog helpers ──────────────────────────────────────────────────────
 
@@ -226,6 +252,12 @@ class PortfolioService:
                 funding_usd=row["funding_usd"],
                 notes=row["notes"],
                 settings={key: value for key, value in snapshot.items() if key != "legs"},
+                episode_id=row["episode_id"],
+                roi_expected_entry=row["roi_expected_entry"],
+                roi_actual_entry=row["roi_actual_entry"],
+                exit_spread_expected=row["exit_spread_expected"],
+                click_to_fill_ms_long=row["click_to_fill_ms_long"],
+                click_to_fill_ms_short=row["click_to_fill_ms_short"],
             )
         if self.trades:
             self._journal.emit(Level.INFO, "portfolio", "restored", pairs=len(self.trades))
@@ -237,15 +269,27 @@ class PortfolioService:
     def _keyed_exchanges(self) -> list[str]:
         return [item["name"] for item in self._exchanges.snapshot() if item["keys"] in ("saved", "ok", "warning", "checking")]
 
+    def poke(self) -> None:
+        """Poll positions now rather than on the next timer, e.g. after a private stream reported a change."""
+        if self._poke is not None:
+            self._poke.set()
+
     async def run_positions(self) -> None:
+        self._poke = asyncio.Event()
         while True:
             try:
                 await self.poll_positions()
             except Exception:
                 log.exception("position poll failed")
-            await asyncio.sleep(self._settings.positions_poll_s)
+            self._poke.clear()
+            try:
+                await asyncio.wait_for(self._poke.wait(), self._settings.positions_poll_s)
+                await asyncio.sleep(0.2)  # let a burst of events settle into one poll
+            except TimeoutError:
+                pass
 
-    async def poll_positions(self) -> None:
+    async def poll_positions(self, required: tuple[str, ...] = ()) -> bool:
+        """Refresh positions; True only when every keyed exchange (and every required one) answered."""
         exchanges = self._keyed_exchanges()
         results = await asyncio.gather(
             *(self._exchanges.adapter(name).fetch_positions(self._instruments(name)) for name in exchanges),
@@ -265,6 +309,10 @@ class PortfolioService:
             if name not in exchanges:
                 del self._accounts[name]
         self._apply_reconciliation(complete)
+        return complete and all(name in exchanges for name in required)
+
+    def record_for_trade(self, trade: Trade) -> PairRecord | None:
+        return self._record_for(trade.long_exchange, trade.long_symbol, trade.short_exchange, trade.short_symbol)
 
     def _apply_reconciliation(self, complete: bool) -> None:
         positions = [position for account in self._accounts.values() for position in account.positions]
@@ -298,7 +346,8 @@ class PortfolioService:
                 except Exception as exc:
                     log.warning("balance of %s failed: %s", name, exc)
                     continue
-                self._accounts.setdefault(name, _ExchangeState()).balance = balance
+                account = self._accounts.setdefault(name, _ExchangeState())
+                account.balance, account.balance_ms = balance, self._clock_ms()
                 self._submit(
                     "balance_snapshots",
                     {
@@ -412,6 +461,40 @@ class PortfolioService:
         if active != self._active:
             self._active = active
             self._on_active_change(active)
+
+    # ── hooks for execution ──────────────────────────────────────────────────
+
+    def add_trade(self, trade: Trade) -> None:
+        self.trades[trade.id] = trade
+        self._submit("trades", trade.row())
+        self._update_active()
+
+    def save(self, trade: Trade) -> None:
+        self._submit("trades", trade.row())
+
+    def finish(self, trade: Trade) -> None:
+        """A closed or failed pair leaves the active set; its final row is written."""
+        self._submit("trades", trade.row())
+        self.trades.pop(trade.id, None)
+        self._update_active()
+
+    def legs_of(self, trade: Trade) -> tuple[Position | None, Position | None]:
+        positions = [position for account in self._accounts.values() for position in account.positions]
+        return reconcile([trade.legs()], positions).legs[trade.id]
+
+    def available_usd(self, exchange: str, max_age_ms: float) -> Decimal | None:
+        account = self._accounts.get(exchange)
+        if account is None or account.balance is None or account.balance_ms is None:
+            return None
+        if self._clock_ms() - account.balance_ms > max_age_ms:
+            return None
+        return account.balance.available_usd
+
+    def open_tokens(self) -> frozenset[str]:
+        return frozenset(trade.token for trade in self.trades.values() if trade.status != "closed")
+
+    def open_notional_usd(self) -> Decimal:
+        return sum((trade.qty_tokens * trade.entry_long_avg for trade in self.trades.values() if trade.status != "closed"), Decimal(0))
 
     # ── user actions ─────────────────────────────────────────────────────────
 

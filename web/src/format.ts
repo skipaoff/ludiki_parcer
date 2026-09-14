@@ -51,6 +51,32 @@ export function describe(event: JournalEvent): string {
       const warnings = Array.isArray(payload.warnings) ? payload.warnings : [];
       return `${exchangeName(event)} ключ принят${warnings.length ? ` · замечания: ${warnings.join(", ")}` : ""}`;
     }
+    case "trading.opening":
+      return `${String(payload.token)} · открываю пару · ${String(payload.qty_tokens)} токенов · ROI ожид. ${Number(payload.roi_expected).toFixed(2)}%`;
+    case "trading.opened":
+      return `${String(payload.token)} · пара открыта · ROI ожид. ${Number(payload.roi_expected).toFixed(2)}% факт ${Number(payload.roi_actual).toFixed(2)}% · ${String(payload.ms_long)}/${String(payload.ms_short)}мс`;
+    case "trading.closing":
+      return `${String(payload.token)} · закрываю пару`;
+    case "trading.closed":
+      return `${String(payload.token)} · пара закрыта · PnL $${Number(payload.pnl_net_usd).toFixed(2)}`;
+    case "trading.open_rejected":
+      return `${String(payload.token)} · обе ноги отклонены, позиций нет`;
+    case "trading.leg_rejected_hedge_closed":
+      return `${String(payload.token)} · СБОЙ НОГИ · одна нога отклонена, исполненная закрыта`;
+    case "trading.partial_fill_equalized":
+      return `${String(payload.token)} · частичное исполнение, ноги выровнены`;
+    case "trading.partial_fill_closed":
+      return `${String(payload.token)} · частичное исполнение ниже минимума, обе ноги закрыты`;
+    case "trading.hedge_fix_failed":
+      return `${String(payload.token)} · НЕ УДАЛОСЬ ЗАКРЫТЬ ИСПОЛНЕННУЮ НОГУ · ${String(payload.side)}`;
+    case "trading.leg_status_unknown":
+      return `${String(payload.token)} · СТАТУС ОРДЕРА НЕИЗВЕСТЕН, выясняю`;
+    case "trading.leg_close_failed":
+      return `${String(payload.token)} · НОГА НЕ ЗАКРЫЛАСЬ`;
+    case "trading.warmup_failed":
+      return `${exchangeName(event)} · не удалось выставить плечо и маржу · ${String(payload.symbol)} · ${String(payload.error ?? "")}`;
+    case "app.stopped_with_open_pairs":
+      return `ТЕРМИНАЛ ОСТАНОВЛЕН ПРИ ОТКРЫТЫХ ПАРАХ (${String(payload.pairs)}) — позиции на биржах остаются`;
     case "portfolio.leg_lost":
       return `${String(payload.token)} · НОГА ПОТЕРЯНА · ${(Array.isArray(payload.issues) ? payload.issues : []).join(", ")}`;
     case "portfolio.leg_found":

@@ -75,7 +75,25 @@ positions_poll_s = 5            # positions from REST; needs keys
 balances_poll_s = 60
 funding_poll_s = 300
 liquidation_warning_pct = 10    # warn when a leg is this close to its liquidation price
+
+[trading]
+# Master switch. While false, Open and Close send nothing. Turn on only after the trial trade (scripts/trial_trade.py)
+# passed on both exchanges and the account check accepted both keys.
+enabled = false
+leverage_binance = 3
+leverage_mexc = 3
+isolated = true                 # isolated margin on both legs; false means cross
+entry_min_roi_pct = 0.50        # net ROI by book at the moment of the click; below it no orders leave
 max_open_pairs = 3
+max_total_usd = 5000            # notional per leg summed over open pairs
+one_pair_per_token = true
+margin_buffer_pct = 20          # free margin must cover size / leverage plus this buffer on each exchange
+status_query_attempts = 10      # an order with unknown outcome is queried this many times...
+status_query_interval_ms = 1000 # ...this far apart, before the pair stays "opening" with an alarm
+close_attempts = 3
+close_retry_pause_ms = 300
+maintenance_block_s = 60        # after a maintenance answer the exchange is blocked for new pairs this long
+warmup_retry_s = 60
 
 [logging]
 level = "INFO"
