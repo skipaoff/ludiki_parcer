@@ -30,6 +30,14 @@ ludik.cmd
 
 Флаги: `--no-browser`, `--config путь\к\config.toml`. Настройки по умолчанию — `config.example.toml`; чтобы поменять, скопируйте его в `config.toml`.
 
+**Ярлык на рабочем столе.** Создаётся один раз (и заново, если папка проекта переехала):
+
+```bat
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\windows\create_desktop_shortcut.ps1 -Force
+```
+
+Ярлык «Terminal Ludik» запускает `ludik.cmd --desktop`: окно консоли остаётся открытым, пока терминал работает, а если запуск не удался, показывает причину и ждёт нажатия клавиши. Иконка — `assets/ludik.ico`, рисуется `scripts/windows/make_icon.py`.
+
 ## Торговля
 
 Торговля выключена, пока в `config.toml` не стоит `[trading] enabled = true`. Порядок включения:
