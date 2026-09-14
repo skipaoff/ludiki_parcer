@@ -33,8 +33,14 @@ class EventKind(str, Enum):
 
 @dataclass(frozen=True, slots=True)
 class EpisodeRules:
+    """
+    enter_after_ms — how long a gap must live before it is shown: dips below the exit level shorter than
+    exit_after_ms do not reset that clock, a longer dip (or no measurement) does. 45 s by the owner's rule (14.09.2026):
+    one-second lead-lag blips cannot be caught by hand.
+    """
+
     min_roi_net_pct: Decimal
-    enter_after_ms: int = 300
+    enter_after_ms: int = 45_000
     exit_hysteresis_pct: Decimal = Decimal("0.10")
     exit_after_ms: int = 2_000
     max_lifetime_ms: int = 24 * 3600 * 1000
@@ -125,9 +131,13 @@ def step(
         return end(state, sample.ts_ms, "timeout")
 
     if state.phase is Phase.CANDIDATE:
-        if not is_above:
-            return None, []
-        if sample.ts_ms - state.above_since_ms >= rules.enter_after_ms:
+        if not _above(sample, rules.min_roi_net_pct - rules.exit_hysteresis_pct):
+            below_since = state.below_since_ms if state.below_since_ms is not None else sample.ts_ms
+            if sample.ts_ms - below_since >= rules.exit_after_ms:
+                return None, []
+            return replace(state, below_since_ms=below_since), []
+        state = replace(state, below_since_ms=None)
+        if is_above and sample.ts_ms - state.above_since_ms >= rules.enter_after_ms:
             entered = _track_peak(_enter_feed(state, sample), sample)
             return entered, [EpisodeEvent(EventKind.ENTERED_FEED, sample.ts_ms)]
         return state, []

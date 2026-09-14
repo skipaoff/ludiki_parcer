@@ -124,6 +124,7 @@ export interface FeedRow {
   roi_net_pct: string | null;
   roi_gross_pct: string | null;
   roi_top_pct: number | null;
+  top_gross_pct: number | null;
   exit_spread_pct: string | null;
   capacity_usd: string | null;
   age_long_ms: number | null;
@@ -151,7 +152,7 @@ export interface TradingStatus {
 export interface FeedView {
   rows: FeedRow[];
   radar: FeedRow[];
-  settings?: { size_usd: string; min_roi_pct: string; fresh_ms: number; taker_fee_pct: Record<string, string> };
+  settings?: { size_usd: string; min_roi_pct: string; enter_after_ms: number; fresh_ms: number; taker_fee_pct: Record<string, string> };
   stats: Record<string, number>;
   streams?: Record<string, Partial<Record<"connections" | "sockets" | "depth_symbols" | "polls" | "poll_errors" | "listings" | "reconnects", number>>>;
 }

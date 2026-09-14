@@ -21,6 +21,9 @@ def test_parse_accepts_numbers_in_range_and_refuses_the_rest():
         parse_changes({"min_roi_pct": "abc"})
     with pytest.raises(InvalidSetting):
         parse_changes({"min_roi_pct": "NaN"})
+    assert parse_changes({"enter_after_ms": "45000"}) == {"enter_after_ms": 45000}
+    with pytest.raises(InvalidSetting, match="whole"):
+        parse_changes({"enter_after_ms": "4500.5"})
 
 
 async def test_lower_threshold_lets_a_smaller_gap_into_the_feed():
@@ -43,7 +46,7 @@ async def test_lower_threshold_lets_a_smaller_gap_into_the_feed():
     run_gap("100.40")  # 0.4 % gross, 0.2 % net — below the 0.5 % default
     assert engine.view()["rows"] == []
 
-    assert await service.update({"min_roi_pct": "0.1"}) == {"size_usd": "1000", "min_roi_pct": "0.1"}
+    assert await service.update({"min_roi_pct": "0.1"}) == {"size_usd": "1000", "min_roi_pct": "0.1", "enter_after_ms": "300"}
     clock.now += 1_100
     run_gap("100.40")
 

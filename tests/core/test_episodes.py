@@ -3,13 +3,14 @@ from decimal import Decimal
 from app.core.episodes import EpisodeRules, EventKind, Phase, Sample, end, step
 from tests.core.helpers import D
 
-RULES = EpisodeRules(min_roi_net_pct=D("0.50"))
+RULES = EpisodeRules(min_roi_net_pct=D("0.50"), enter_after_ms=300)
+RULES_45S = EpisodeRules(min_roi_net_pct=D("0.50"))
 
 
-def run(samples, state=None):
+def run(samples, state=None, rules=RULES):
     events = []
     for ts, roi, exit_spread in samples:
-        state, produced = step(state, Sample(ts, None if roi is None else D(roi), None if exit_spread is None else D(exit_spread)), RULES)
+        state, produced = step(state, Sample(ts, None if roi is None else D(roi), None if exit_spread is None else D(exit_spread)), rules)
         events.extend(produced)
     return state, events
 
@@ -19,9 +20,30 @@ def kinds(events):
 
 
 def test_flicker_shorter_than_enter_delay_leaves_no_episode():
-    state, events = run([(0, "0.8", "1.2"), (100, "0.8", "1.2"), (200, "0.3", "1.0")])
+    state, events = run([(0, "0.8", "1.2"), (100, "0.8", "1.2"), (200, "0.3", "1.0"), (2_300, "0.3", "1.0")])
     assert state is None
     assert events == []
+
+
+def test_gap_must_live_45_seconds_before_it_is_shown():
+    one_second = [(ms, "0.9", "1.2") for ms in range(0, 44_000, 1_000)]
+    state, events = run(one_second, rules=RULES_45S)
+    assert state.phase is Phase.CANDIDATE and events == []
+
+    state, events = run([(45_000, "0.9", "1.2")], state, RULES_45S)
+    assert kinds(events) == [EventKind.ENTERED_FEED]
+    assert state.detected_ms == 0 and state.first_entered_feed_ms == 45_000
+
+
+def test_short_dip_does_not_reset_the_45_second_clock_but_a_long_one_does():
+    dip = [(0, "0.9", "1.2"), (20_000, "0.9", "1.2"), (20_500, "0.2", "1.0"), (21_500, None, None), (22_000, "0.9", "1.2")]
+    state, _ = run(dip, rules=RULES_45S)
+    state, events = run([(45_000, "0.9", "1.2")], state, RULES_45S)
+    assert kinds(events) == [EventKind.ENTERED_FEED]
+
+    long_dip = [(0, "0.9", "1.2"), (20_000, "0.9", "1.2"), (20_500, "0.2", "1.0"), (22_600, "0.2", "1.0")]
+    state, events = run(long_dip, rules=RULES_45S)
+    assert state is None and events == []
 
 
 def test_gap_enters_feed_after_delay_and_tracks_peak():

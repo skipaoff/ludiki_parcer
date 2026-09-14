@@ -54,7 +54,7 @@ def build(record: PairRecord, **settings):
         Catalog([record]),
         state,
         {"binance": binance, "mexc": mexc},
-        FeedSettings(size_usd=Decimal("1000"), min_roi_pct=Decimal("0.5"), enter_after_ms=300, **settings),
+        FeedSettings(**{"size_usd": Decimal("1000"), "min_roi_pct": Decimal("0.5"), "enter_after_ms": 300, **settings}),
         lambda exchange: Decimal("0.05"),
         lambda instruments: radar_symbols.extend(sorted(item.symbol_raw for item in instruments)),
         clock,
@@ -93,7 +93,26 @@ def test_gap_enters_the_feed_after_holding_above_threshold():
     assert Decimal(row["roi_net_pct"]) == Decimal("1.2") - Decimal("0.2")
     assert Decimal(row["capacity_usd"]) > 0
     assert row["block"] is None
-    assert row["lifetime_ms"] == 0
+    assert row["lifetime_ms"] == 400  # counted from the first sighting, not from entering the feed
+    assert row["top_gross_pct"] == round(float(row["roi_top_pct"]) + 0.2, 4)
+
+
+def test_default_45_second_rule_keeps_short_gaps_out_and_their_books_in():
+    engine, state, clock, binance, mexc, _ = build(sol_record(), enter_after_ms=45_000)
+    engine.tick()
+    for _ in range(44):
+        push_market(state)
+        engine.tick()
+        clock.now += 1_000
+    assert engine.view()["rows"] == []
+    assert engine.view()["radar"][0]["phase"] == "candidate"
+    assert binance.depth == ["SOLUSDT"]  # the candidate keeps its books while it earns its lifetime
+
+    push_market(state)
+    clock.now += 1_000
+    engine.tick()
+    rows = engine.view()["rows"]
+    assert len(rows) == 1 and rows[0]["lifetime_ms"] >= 45_000
 
 
 def test_stale_leg_blocks_the_row_and_does_not_extend_the_gap():

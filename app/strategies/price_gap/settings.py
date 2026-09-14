@@ -23,15 +23,17 @@ PREFIX = "feed."
 EDITABLE = {
     "size_usd": (Decimal("5"), Decimal("1000000")),
     "min_roi_pct": (Decimal("-5"), Decimal("50")),
+    "enter_after_ms": (Decimal("0"), Decimal("3600000")),
 }
+WHOLE_NUMBERS = frozenset({"enter_after_ms"})
 
 
 class InvalidSetting(ValueError):
     pass
 
 
-def parse_changes(body: dict[str, Any]) -> dict[str, Decimal]:
-    changes = {}
+def parse_changes(body: dict[str, Any]) -> dict[str, Decimal | int]:
+    changes: dict[str, Decimal | int] = {}
     for name, value in body.items():
         if name not in EDITABLE:
             raise InvalidSetting(f"{name} cannot be changed here")
@@ -42,7 +44,12 @@ def parse_changes(body: dict[str, Any]) -> dict[str, Decimal]:
         low, high = EDITABLE[name]
         if not number.is_finite() or not low <= number <= high:
             raise InvalidSetting(f"{name} must be between {low} and {high}")
-        changes[name] = number
+        if name in WHOLE_NUMBERS:
+            if number != number.to_integral_value():
+                raise InvalidSetting(f"{name} must be a whole number")
+            changes[name] = int(number)
+        else:
+            changes[name] = number
     return changes
 
 

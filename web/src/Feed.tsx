@@ -97,24 +97,46 @@ function legText(leg: FeedRow["long"], avg: string | null): string {
   return leg ? `${leg.exchange.toUpperCase()} ${price(avg)}` : "—";
 }
 
-function SettingsForm({ token, sizeUsd, minRoiPct }: { token: string; sizeUsd?: string; minRoiPct?: string }) {
+function SettingsForm({
+  token,
+  sizeUsd,
+  minRoiPct,
+  enterAfterMs,
+}: {
+  token: string;
+  sizeUsd?: string;
+  minRoiPct?: string;
+  enterAfterMs?: number;
+}) {
   const [size, setSize] = useState("");
   const [threshold, setThreshold] = useState("");
+  const [lifetime, setLifetime] = useState("");
   const [message, setMessage] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const lifetimeSeconds = enterAfterMs === undefined ? "" : String(enterAfterMs / 1000);
 
-  const dirty = (size !== "" && size !== sizeUsd) || (threshold !== "" && threshold !== minRoiPct);
+  const dirty =
+    (size !== "" && size !== sizeUsd) || (threshold !== "" && threshold !== minRoiPct) || (lifetime !== "" && lifetime !== lifetimeSeconds);
 
   const apply = async () => {
     const body: Record<string, string> = {};
     if (size !== "" && size !== sizeUsd) body.size_usd = size;
     if (threshold !== "" && threshold !== minRoiPct) body.min_roi_pct = threshold;
+    if (lifetime !== "" && lifetime !== lifetimeSeconds) {
+      const seconds = Number(lifetime.replace(",", "."));
+      if (!Number.isFinite(seconds) || seconds < 0) {
+        setMessage("мин. жизнь — число секунд");
+        return;
+      }
+      body.enter_after_ms = String(Math.round(seconds * 1000));
+    }
     setBusy(true);
     setMessage(null);
     try {
       await apiSend("PUT", "/api/feed/settings", token, body);
       setSize("");
       setThreshold("");
+      setLifetime("");
     } catch (reason) {
       setMessage((reason as Error).message);
     } finally {
@@ -131,7 +153,8 @@ function SettingsForm({ token, sizeUsd, minRoiPct }: { token: string; sizeUsd?: 
       }}
     >
       Размер $<input value={size === "" ? sizeUsd ?? "" : size} onChange={(event) => setSize(event.target.value)} /> на ногу ·
-      порог ленты <input value={threshold === "" ? minRoiPct ?? "" : threshold} onChange={(event) => setThreshold(event.target.value)} />%{" "}
+      порог ленты <input value={threshold === "" ? minRoiPct ?? "" : threshold} onChange={(event) => setThreshold(event.target.value)} />% ·
+      живёт ≥ <input value={lifetime === "" ? lifetimeSeconds : lifetime} onChange={(event) => setLifetime(event.target.value)} />с{" "}
       {dirty && (
         <button className="action" type="submit" disabled={busy}>
           [ПРИМЕНИТЬ]
@@ -248,7 +271,7 @@ export function FeedScreen({ token, snapshot }: { token: string; snapshot: Snaps
           <input placeholder="монета" value={filters.search} onChange={(event) => set("search", event.target.value)} />
         </div>
         <div className="toolbar muted">
-          <SettingsForm token={token} sizeUsd={settings?.size_usd} minRoiPct={settings?.min_roi_pct} />
+          <SettingsForm token={token} sizeUsd={settings?.size_usd} minRoiPct={settings?.min_roi_pct} enterAfterMs={settings?.enter_after_ms} />
           <span>
             тейкер{" "}
             {Object.entries(settings?.taker_fee_pct ?? {})
@@ -303,7 +326,9 @@ export function FeedScreen({ token, snapshot }: { token: string; snapshot: Snaps
         </table>
         {rows.length === 0 && (
           <p className="empty muted">
-            {feed ? "Сейчас нет вилок выше порога. Лучшие текущие спреды — в радаре ниже." : "Лента запускается…"}
+            {feed
+              ? `Сейчас нет вилок, которые держатся выше порога дольше ${Math.round((settings?.enter_after_ms ?? 0) / 1000)} с. Кандидаты и лучшие текущие спреды — в радаре ниже.`
+              : "Лента запускается…"}
           </p>
         )}
         {tradeMessage && (
@@ -315,7 +340,7 @@ export function FeedScreen({ token, snapshot }: { token: string; snapshot: Snaps
           <p className="empty muted">Торговля выключена: включается в config.toml, раздел [trading], после пробной сделки.</p>
         )}
 
-        <Radar rows={feed?.radar ?? []} />
+        <Radar rows={feed?.radar ?? []} feeTotals={settings?.taker_fee_pct ?? {}} enterAfterMs={settings?.enter_after_ms} />
 
         <div className="toolbar muted stats-line">
           пар {stats.pairs ?? "—"} · в радаре {stats.radar_pairs ?? "—"} · стаканов {stats.books ?? "—"} · отслеживается{" "}
@@ -339,41 +364,68 @@ export function FeedScreen({ token, snapshot }: { token: string; snapshot: Snaps
   );
 }
 
-function Radar({ rows }: { rows: FeedRow[] }) {
+function radarStatus(row: FeedRow, enterAfterMs: number | undefined): string {
+  const blocked = blockText(row.block);
+  if (blocked) return blocked;
+  if (row.phase === "candidate" && row.lifetime_ms !== null && enterAfterMs) {
+    return `живёт ${Math.floor(row.lifetime_ms / 1000)}/${Math.round(enterAfterMs / 1000)}с`;
+  }
+  return row.phase === "tracking" ? "отслеживается" : "ок";
+}
+
+function Radar({ rows, feeTotals, enterAfterMs }: { rows: FeedRow[]; feeTotals: Record<string, string>; enterAfterMs?: number }) {
   if (rows.length === 0) return null;
+  const roundTrip = (row: FeedRow) => {
+    if (!row.long || !row.short) return null;
+    const long = Number(feeTotals[row.long.exchange] ?? NaN);
+    const short = Number(feeTotals[row.short.exchange] ?? NaN);
+    return Number.isNaN(long + short) ? null : (long + short) * 2;
+  };
   return (
     <>
       <div className="toolbar section-title">
         <span>РАДАР · лучшие спреды сейчас, ниже порога ленты</span>
       </div>
+      <p className="empty muted legend">
+        Лучш. цены, стакан и выход — одна величина: разница цен шорт − лонг в % от цены лонга, без комиссий. Лучш. цены — по
+        первым уровням, стакан — по средней цене на ваш размер, выход — сколько стоит закрыть тот же размер сейчас. ROI =
+        стакан − комиссии круга (4 тейкера).
+      </p>
       <table className="grid feed-table radar-table">
         <thead>
           <tr>
             <th className="left">МОНЕТА</th>
             <th className="left">ЛОНГ → ШОРТ</th>
-            <th title="по лучшим ценам, верхняя граница">ЛУЧШ. ЦЕНЫ</th>
-            <th title="по стакану на размер, после комиссий">СТАКАН</th>
-            <th>ВЫХОД</th>
+            <th title="разница цен шорт − лонг по лучшим ценам, без комиссий">ЛУЧШ. ЦЕНЫ</th>
+            <th title="разница средних цен шорт − лонг по стакану на размер, без комиссий">СТАКАН</th>
+            <th title="разница цен шорт − лонг при закрытии размера сейчас, без комиссий">ВЫХОД</th>
+            <th title="комиссии круга: вход и выход на обеих ногах">КОМИССИИ</th>
+            <th title="по стакану на размер после комиссий круга">ROI</th>
             <th>ВОЗРАСТ</th>
             <th className="left">СТАТУС</th>
           </tr>
         </thead>
         <tbody>
-          {rows.map((row) => (
-            <tr key={row.key} className="muted">
-              <td className="left">{row.token}</td>
-              <td className="left">
-                {row.long && row.short ? `${row.long.exchange.toUpperCase()} → ${row.short.exchange.toUpperCase()}` : "—"}
-              </td>
-              <td>{signedPct(row.roi_top_pct)}</td>
-              <td>{signedPct(row.roi_net_pct)}</td>
-              <td>{signedPct(row.exit_spread_pct)}</td>
-              <td>
-                {row.age_long_ms ?? "—"}/{row.age_short_ms ?? "—"}мс
-              </td>
-              <td className="left">{blockText(row.block) ?? (row.phase === "tracking" ? "отслеживается" : "ок")}</td>
-            </tr>
-          ))}
+          {rows.map((row) => {
+            const fees = roundTrip(row);
+            return (
+              <tr key={row.key} className="muted">
+                <td className="left">{row.token}</td>
+                <td className="left">
+                  {row.long && row.short ? `${row.long.exchange.toUpperCase()} → ${row.short.exchange.toUpperCase()}` : "—"}
+                </td>
+                <td>{signedPct(row.top_gross_pct)}</td>
+                <td>{signedPct(row.roi_gross_pct)}</td>
+                <td>{signedPct(row.exit_spread_pct)}</td>
+                <td>{fees === null ? "—" : `${fees.toFixed(2)}%`}</td>
+                <td className="strong">{signedPct(row.roi_net_pct)}</td>
+                <td>
+                  {row.age_long_ms ?? "—"}/{row.age_short_ms ?? "—"}мс
+                </td>
+                <td className="left">{radarStatus(row, enterAfterMs)}</td>
+              </tr>
+            );
+          })}
         </tbody>
       </table>
     </>

@@ -14,10 +14,16 @@ from dataclasses import dataclass
 
 @dataclass(frozen=True, slots=True)
 class TopRoi:
+    """
+    gross_pct — price difference short minus long at best prices, in % of the long price, before fees:
+    the same measure as the book entry spread and the exit spread, so the three can be compared directly.
+    """
+
     key: str
     long_exchange: str
     short_exchange: str
     roi_net_pct: float
+    gross_pct: float = 0.0
 
 
 def best_price_roi(
@@ -33,11 +39,11 @@ def best_price_roi(
     """Per-token best prices of both legs; the direction with the higher net ROI. None when any price is missing."""
     if min(bid_a, ask_a, bid_b, ask_b) <= 0:
         return None
-    a_long = (bid_b - ask_a) / ask_a * 100 - round_trip_fee_pct
-    b_long = (bid_a - ask_b) / ask_b * 100 - round_trip_fee_pct
-    if a_long >= b_long:
-        return TopRoi(key, exchange_a, exchange_b, a_long)
-    return TopRoi(key, exchange_b, exchange_a, b_long)
+    a_gross = (bid_b - ask_a) / ask_a * 100
+    b_gross = (bid_a - ask_b) / ask_b * 100
+    if a_gross >= b_gross:
+        return TopRoi(key, exchange_a, exchange_b, a_gross - round_trip_fee_pct, a_gross)
+    return TopRoi(key, exchange_b, exchange_a, b_gross - round_trip_fee_pct, b_gross)
 
 
 @dataclass(frozen=True, slots=True)

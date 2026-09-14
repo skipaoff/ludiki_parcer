@@ -25,6 +25,7 @@ def test_direction_with_the_cheaper_ask_goes_long():
     roi = best_price_roi("P", "binance", bid_a=100.0, ask_a=100.1, exchange_b="mexc", bid_b=101.2, ask_b=101.3, round_trip_fee_pct=0.2)
     assert (roi.long_exchange, roi.short_exchange) == ("binance", "mexc")
     assert roi.roi_net_pct == pytest.approx((101.2 - 100.1) / 100.1 * 100 - 0.2)
+    assert roi.gross_pct == pytest.approx(roi.roi_net_pct + 0.2)
 
     mirrored = best_price_roi("P", "binance", 101.2, 101.3, "mexc", 100.0, 100.1, 0.2)
     assert (mirrored.long_exchange, mirrored.short_exchange) == ("mexc", "binance")

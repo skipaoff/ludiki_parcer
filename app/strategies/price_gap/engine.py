@@ -218,12 +218,18 @@ class PriceGapEngine:
     def _choose(self, now: float) -> None:
         by_peak = sorted(self._episodes.items(), key=lambda item: item[1].roi_peak or Decimal(0), reverse=True)
         in_feed = [self._episode_pair[key] for key, episode in by_peak if episode.phase is Phase.IN_FEED]
+        # A gap that is still earning its minimum lifetime must keep its books, or the clock could never run out.
+        candidates_alive = [
+            self._episode_pair[key]
+            for key, episode in sorted(self._episodes.items(), key=lambda item: item[1].detected_ms)
+            if episode.phase is Phase.CANDIDATE
+        ]
         # Gaps that left the feed are followed until convergence, but never crowd out candidates entirely.
         tracking = [self._episode_pair[key] for key, episode in by_peak if episode.phase is Phase.TRACKING][
             : self._settings.tracking_limit
         ]
         # Open pairs come first: their exit spread and PnL depend on these books.
-        watched = [key for key in self._pinned() if key in self._records] + in_feed + tracking
+        watched = [key for key in self._pinned() if key in self._records] + in_feed + candidates_alive + tracking
         threshold = float(self._settings.min_roi_pct - self._settings.candidate_margin_pct)
         # Tradable pairs get order books first; pairs flagged suspicious only take slots that are left over.
         ranked = sorted(self._tops, key=lambda top: not self._records[top.key].tradable)
@@ -408,12 +414,15 @@ class PriceGapEngine:
             "roi_net_pct": _text(quote.roi_net_pct, 4) if quote else None,
             "roi_gross_pct": _text(quote.roi_gross_pct, 4) if quote else None,
             "roi_top_pct": None if top is None else round(top.roi_net_pct, 4),
+            # Same measure in three places — short minus long price in %, before fees: best prices, book on size, exit.
+            "top_gross_pct": None if top is None else round(top.gross_pct, 4),
             "exit_spread_pct": _text(quote.exit_spread_pct, 4) if quote else None,
             "capacity_usd": _text(quote.capacity_usd, 6) if quote else None,
             "age_long_ms": _ms(quote.age_long_ms) if quote else None,
             "age_short_ms": _ms(quote.age_short_ms) if quote else None,
             "phase": episode.phase.value if episode else None,
-            "lifetime_ms": int(now - episode.first_entered_feed_ms) if episode and episode.first_entered_feed_ms else None,
+            # Counted from the moment the gap appeared, so a feed row shows at least the required minimum lifetime.
+            "lifetime_ms": int(now - episode.detected_ms) if episode else None,
             "roi_peak_pct": _text(episode.roi_peak, 4) if episode else None,
             "volume24h_weak_usd": _text(assessment.volume24h_weak_usd, 6),
             "suspicious": record.suspicious,
@@ -465,6 +474,7 @@ class PriceGapEngine:
             "settings": {
                 "size_usd": _text(self._settings.size_usd),
                 "min_roi_pct": _text(self._settings.min_roi_pct),
+                "enter_after_ms": self._settings.enter_after_ms,
                 "fresh_ms": self._settings.fresh_ms,
                 "taker_fee_pct": {exchange: _text(self._taker_fee_pct(exchange)) for exchange in self._feeds},
             },
