@@ -1,0 +1,28 @@
+{
+ "code": 0,
+ "msg": "",
+ "data": [
+  {
+   "symbol": "BTC-USDT",
+   "markPrice": "76404.9",
+   "indexPrice": "76418.0",
+   "lastFundingRate": "0.00008900",
+   "nextFundingTime": 1789488000000,
+   "fundingIntervalHours": 8,
+   "minFundingRate": "-0.003000",
+   "maxFundingRate": "0.003000",
+   "updateTime": 1789459200000
+  },
+  {
+   "symbol": "IOST-USDT",
+   "markPrice": "0.0007652",
+   "indexPrice": "0.0007658",
+   "lastFundingRate": "-0.00002200",
+   "nextFundingTime": 1789480800000,
+   "fundingIntervalHours": 1,
+   "minFundingRate": "-0.020000",
+   "maxFundingRate": "0.020000",
+   "updateTime": 1789477200000
+  }
+ ]
+}

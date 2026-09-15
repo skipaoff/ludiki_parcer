@@ -24,6 +24,7 @@ from app.core.symbols import parse_symbol
 from app.core.legs import OrderOutcome
 from app.exchanges.base import Balance, ClockProbe, FillReport, OrderReport, Position
 from app.exchanges.ccxt_support import describe_error, error_code, is_unknown_outcome_error, now_ms, parse, step
+from app.system.tls import with_shared_context
 
 FEE_REFERENCE_SYMBOL = "BTC_USDT"
 POSITION_MODES = {1: False, 2: True}  # 1 hedge, 2 one-way
@@ -278,7 +279,7 @@ class MexcAdapter:
     name = "mexc"
 
     def __init__(self, api_key: str | None = None, api_secret: str | None = None, timeout_s: float = 10) -> None:
-        self._client = ccxt.mexc(
+        self._client = with_shared_context(ccxt.mexc(
             {
                 "apiKey": api_key or "",
                 "secret": api_secret or "",
@@ -286,9 +287,9 @@ class MexcAdapter:
                 "timeout": int(timeout_s * 1000),
                 "options": {"defaultType": "swap"},
             }
-        )
+        ))
         # Probes get their own client so the rate limiter never queues them behind catalog requests.
-        self._probe_client = ccxt.mexc({"enableRateLimit": False, "timeout": int(timeout_s * 1000)})
+        self._probe_client = with_shared_context(ccxt.mexc({"enableRateLimit": False, "timeout": int(timeout_s * 1000)}))
 
     async def close(self) -> None:
         await self._client.close()

@@ -33,6 +33,8 @@ from app.exchanges.service import ExchangeService
 from app.instruments.service import InstrumentService
 from app.market.binance_streams import BinanceStreams, aster_streams
 from app.market.bingx_market import BingxMarket
+from app.market.funding import POLL_S as FUNDING_POLL_S
+from app.market.funding import FundingService
 from app.market.gate_market import GateMarket
 from app.market.mexc_market import MexcMarket
 from app.market.variational_market import VariationalMarket
@@ -126,6 +128,11 @@ async def _serve(
             market, lambda: exchanges.adapter("variational"), settings.exchanges.variational.poll_ms
         )
 
+    funding = FundingService(
+        exchanges.names,
+        variational_stats=(lambda: exchanges.adapter("variational").stats(FUNDING_POLL_S)) if "variational" in exchanges.names else None,
+    )
+
     def on_catalog(contracts: list[Any]) -> None:
         for name in ("binance", "aster"):
             if name in feeds:
@@ -168,6 +175,7 @@ async def _serve(
         portfolio_settings,
         taker_fee_pct,
         on_active_change=on_active_pairs,
+        funding=funding.rate,
     )
     recorder = EpisodeRecorder(writer.submit, feed_snapshot)
     engine = PriceGapEngine(
@@ -180,6 +188,7 @@ async def _serve(
         sink=recorder,
         pinned=portfolio.pinned_pair_keys,
         fresh_ms_overrides={"variational": settings.exchanges.variational.max_quote_age_ms},
+        funding=funding.rate,
     )
     feed_settings = FeedSettingsService(engine, database, journal)
     radar_recorder = RadarRecorder(instruments, market, writer.submit)
@@ -238,7 +247,9 @@ async def _serve(
             "feed": {
                 **engine.view(),
                 "rows": execution.annotate(engine.view()["rows"]),
+                "radar": execution.annotate(engine.view()["radar"]),
                 "streams": {name: feed.stats() for name, feed in feeds.items()},
+                "funding": funding.stats(),
             },
             "trading": {**execution.status(), "private_streams": private_streams.connected, "order_events": order_events.received},
             "history": {"recorded": recorder.recorded, "open": recorder.open_count, "radar_snapshots": radar_recorder.snapshots},
@@ -301,6 +312,7 @@ async def _serve(
         asyncio.create_task(exchanges.check_all_with_keys()),
         asyncio.create_task(instruments.run()),
         *(asyncio.create_task(feed.run()) for feed in feeds.values()),
+        asyncio.create_task(funding.run()),
         asyncio.create_task(engine.run()),
         asyncio.create_task(radar_recorder.run()),
         asyncio.create_task(portfolio.run_positions()),

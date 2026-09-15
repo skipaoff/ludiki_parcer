@@ -46,7 +46,7 @@ async def test_lower_threshold_lets_a_smaller_gap_into_the_feed():
     run_gap("100.40")  # 0.4 % gross, 0.2 % net — below the 0.5 % default
     assert engine.view()["rows"] == []
 
-    assert await service.update({"min_roi_pct": "0.1"}) == {"size_usd": "1000", "min_roi_pct": "0.1", "enter_after_ms": "300"}
+    assert await service.update({"min_roi_pct": "0.1"}) == {"size_usd": "1000", "min_roi_pct": "0.1", "enter_after_ms": "300", "funding_horizon_h": "8"}
     clock.now += 1_100
     run_gap("100.40")
 

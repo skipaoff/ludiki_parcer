@@ -17,7 +17,7 @@ from app.exchanges.aster import adapter as aster
 from app.exchanges.binance import adapter as binance
 from app.exchanges.bingx import adapter as bingx
 from app.market import bingx_market
-from app.market.binance_streams import ALL_BOOK_TICKERS_STREAM, aster_streams, handle_frame
+from app.market.binance_streams import ASTER_RADAR_POLL_S, aster_streams, handle_frame
 from app.market.state import MarketState
 
 FIXTURES = Path(__file__).parent / "fixtures"
@@ -128,18 +128,18 @@ async def test_aster_market_order_uses_v3_with_client_id_and_reduce_only_close()
     assert report.avg_price == Decimal("0.0000034425")
 
 
-def test_aster_streams_take_radar_prices_from_the_all_symbols_stream():
+def test_aster_radar_is_polled_not_streamed():
     state = MarketState(lambda: 1.0)
     state.set_instruments(list(aster_instruments().values()))
-    frame = {"stream": "!bookTicker", "data": {"e": "bookTicker", "u": 1, "s": "1000PEPEUSDT", "b": "0.0034420", "B": "10",
-                                               "a": "0.0034429", "A": "5", "T": 1789375567350, "E": 1789375567351}}
+    frame = {"stream": "1000pepeusdt@depth20@100ms", "data": {"e": "depthUpdate", "s": "1000PEPEUSDT", "T": 1789375567350,
+                                                            "b": [["0.0034420", "10"]], "a": [["0.0034429", "5"]]}}
     handle_frame(state, orjson.dumps(frame), "aster")
-    top = state.tops[("aster", "1000PEPEUSDT")]
-    assert abs(top.bid - 0.000003442) < 1e-15
+    assert state.books[("aster", "1000PEPEUSDT")].bids[0].qty_tokens == Decimal("10000")
     streams = aster_streams(state)
     streams.set_radar(["BTCUSDT", "ETHUSDT"])
-    assert [socket.desired for socket in streams._radar] == [{ALL_BOOK_TICKERS_STREAM}]
-    assert streams.stats()["radar_streams"] == 2
+    # Aster's book tickers ran at 6,600 messages a second: no radar sockets, a REST poll once a second instead.
+    assert streams._radar == [] and streams._radar_poll_s == ASTER_RADAR_POLL_S == 1.0
+    assert streams.stats()["radar_streams"] == 0
 
 
 # ── BingX ────────────────────────────────────────────────────────────────────

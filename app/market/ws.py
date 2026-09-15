@@ -16,6 +16,8 @@ from typing import Callable, Iterable
 
 import websockets
 
+from app.system.tls import shared_context
+
 log = logging.getLogger(__name__)
 
 BuildMessages = Callable[[list[str], bool], Iterable[str]]
@@ -61,7 +63,7 @@ class ManagedSocket:
         backoff = 1.0
         while True:
             try:
-                async with websockets.connect(self.url, max_size=2**24, open_timeout=10, close_timeout=2) as socket:
+                async with websockets.connect(self.url, max_size=2**24, open_timeout=10, close_timeout=2, ssl=shared_context()) as socket:
                     self.connected = True
                     backoff = 1.0
                     self._subscribed = set()

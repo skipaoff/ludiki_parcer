@@ -1,11 +1,11 @@
-// VFP: The terminal screen — tabs, connection indicators, the gaps workspace skeleton and the journal line.
-// Changes when: a screen or a header indicator is added or its layout changes.
+// VFP: The terminal screen — tabs, alarms in the header, the gaps workspace skeleton and the journal line.
+// Changes when: a screen or a header alarm is added or its layout changes.
 // Anti-goal:
-// 1. Colour for anything but emergencies — sign and weight carry meaning, red marks only alarms.
-// 2. Buttons that look active before their stage exists — unfinished actions are shown disabled with the reason.
+// 1. Routine technical figures in the header — pings and link states live in Settings; the header speaks only when something is down.
+// 2. Colour without meaning — green and red mark money made and lost, blinking and red mark alarms.
 
 import { useEffect, useState } from "react";
-import { exchangeTitle, ExchangesSettings, signedMs } from "./Exchanges";
+import { exchangeTitle, ExchangesSettings } from "./Exchanges";
 import { FeedScreen } from "./Feed";
 import { clock, describe, uptime } from "./format";
 import { PairsScreen } from "./Pairs";
@@ -15,12 +15,10 @@ import { useLive, type LinkState } from "./live";
 import { apiGet } from "./session";
 import type { ExchangeState, JournalEvent, Snapshot } from "./types";
 
-type TabId = "gaps" | "funding" | "unlocks" | "trades" | "stats" | "pairs" | "settings";
+type TabId = "gaps" | "trades" | "stats" | "pairs" | "settings";
 
 const TABS: { id: TabId; label: string }[] = [
   { id: "gaps", label: "Гэпы" },
-  { id: "funding", label: "Фандинг·скоро" },
-  { id: "unlocks", label: "Разлоки·скоро" },
   { id: "trades", label: "Сделки" },
   { id: "stats", label: "Статистика" },
   { id: "pairs", label: "Пары" },
@@ -62,7 +60,9 @@ export function App({ token }: { token: string }) {
           ))}
         </nav>
         <div className="indicators">
-          {live.snapshot?.exchanges.map((exchange) => <ExchangeIndicator key={exchange.name} exchange={exchange} />)}
+          {live.snapshot?.exchanges
+            .filter((exchange) => exchange.link === "down")
+            .map((exchange) => <ExchangeAlarm key={exchange.name} exchange={exchange} />)}
           <DatabaseIndicator snapshot={live.snapshot} />
         </div>
       </header>
@@ -71,7 +71,6 @@ export function App({ token }: { token: string }) {
 
       <main className={live.link === "live" ? "body" : "body stale"}>
         {tab === "gaps" && <FeedScreen token={token} snapshot={live.snapshot} />}
-        {(tab === "funding" || tab === "unlocks") && <Placeholder text="Раздел появится после MVP." />}
         {tab === "trades" && <TradesScreen token={token} />}
         {tab === "stats" && <StatsScreen token={token} recordedLive={live.snapshot?.history?.recorded} />}
         {tab === "pairs" && <PairsScreen token={token} summary={live.snapshot?.instruments} />}
@@ -94,40 +93,15 @@ export function App({ token }: { token: string }) {
   );
 }
 
-const KEYS_NOTE: Record<ExchangeState["keys"], string | null> = {
-  none: "нет ключей",
-  saved: "ключ не проверен",
-  checking: "проверка ключа…",
-  ok: null,
-  warning: null,
-  rejected: "ключ не принят",
-};
-
-function ExchangeIndicator({ exchange }: { exchange: ExchangeState }) {
-  const title = exchangeTitle(exchange);
-  if (exchange.link === "down") {
-    return <span className="indicator blink">○ {title} нет связи</span>;
-  }
-  if (exchange.link === "unknown") {
-    return <span className="indicator muted">○ {title} …</span>;
-  }
-  const note = exchange.read_only ? "только данные" : KEYS_NOTE[exchange.keys];
-  return (
-    <span className="indicator">
-      ● {title} {exchange.ping_ms}мс
-      {exchange.clock_warning && exchange.clock_offset_ms != null && (
-        <span className="action"> · часы {signedMs(exchange.clock_offset_ms)}</span>
-      )}
-      {note && <span className={exchange.keys === "rejected" ? "action" : "muted"}> · {note}</span>}
-    </span>
-  );
+function ExchangeAlarm({ exchange }: { exchange: ExchangeState }) {
+  return <span className="indicator blink">○ {exchangeTitle(exchange)} нет связи</span>;
 }
 
 function DatabaseIndicator({ snapshot }: { snapshot: Snapshot | null }) {
   if (!snapshot) return null;
   const { database } = snapshot;
   if (database.status === "ok") {
-    return <span className="indicator muted">● БАЗА</span>;
+    return null;
   }
   return (
     <span className="indicator blink" title={database.error ?? ""}>
@@ -216,9 +190,47 @@ function SettingsScreen({ token, snapshot, now }: { token: string; snapshot: Sna
               {snapshot.database.pending_rows} / {snapshot.database.spooled_rows} / {snapshot.database.rejected_rows}
             </span>
           </div>
+          <FeedEngineRows snapshot={snapshot} />
         </section>
       )}
     </div>
+  );
+}
+
+function FeedEngineRows({ snapshot }: { snapshot: Snapshot }) {
+  const feed = snapshot.feed;
+  if (!feed) return null;
+  const stats = feed.stats ?? {};
+  return (
+    <>
+      <div className="row">
+        <span>лента: пар / в радаре / стаканов / отслеживается / вилок с запуска</span>
+        <span>
+          {stats.pairs ?? "—"} / {stats.radar_pairs ?? "—"} / {stats.books ?? "—"} / {stats.tracked ?? "—"} / {stats.gaps_entered ?? "—"}
+        </span>
+      </div>
+      <div className="row">
+        <span>такт движка / задержка цикла</span>
+        <span>
+          {stats.tick_ms ?? "—"}мс / {stats.loop_lag_ms ?? "—"}мс
+        </span>
+      </div>
+      {Object.entries(feed.streams ?? {}).map(([name, info]) => {
+        const funding = feed.funding?.[name];
+        return (
+          <div className="row" key={name}>
+            <span>{name.toUpperCase()}</span>
+            <span>
+              {info.sockets !== undefined ? `соединений ${info.connections}/${info.sockets}` : ""}
+              {info.depth_symbols !== undefined ? ` · стаканов ${info.depth_symbols}` : ""}
+              {info.polls !== undefined ? ` · опросов ${info.polls}${info.poll_errors ? ` (ошибок ${info.poll_errors})` : ""}` : ""}
+              {info.listings !== undefined ? ` · рынков ${info.listings}` : ""}
+              {funding ? ` · фандинг ${funding.contracts} контр.${funding.age_s !== null ? `, ${funding.age_s}с назад` : ", ещё не получен"}` : ""}
+            </span>
+          </div>
+        );
+      })}
+    </>
   );
 }
 
@@ -240,10 +252,6 @@ function JournalPanel({ events, onClose }: { events: JournalEvent[]; onClose: ()
       </ol>
     </div>
   );
-}
-
-function Placeholder({ text }: { text: string }) {
-  return <p className="empty muted">{text}</p>;
 }
 
 function SessionExpired() {

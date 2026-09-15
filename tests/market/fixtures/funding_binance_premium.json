@@ -1,0 +1,32 @@
+[
+ {
+  "symbol": "LSKUSDT",
+  "markPrice": "0.37097405",
+  "indexPrice": "0.37713440",
+  "estimatedSettlePrice": "0.38005423",
+  "lastFundingRate": "-0.00200209",
+  "interestRate": "0.00010000",
+  "nextFundingTime": 1789480800000,
+  "time": 1789479760002
+ },
+ {
+  "symbol": "BTCUSDT",
+  "markPrice": "76415.38604348",
+  "indexPrice": "76434.21782609",
+  "estimatedSettlePrice": "76816.89406562",
+  "lastFundingRate": "0.00008719",
+  "interestRate": "0.00010000",
+  "nextFundingTime": 1789488000000,
+  "time": 1789479760002
+ },
+ {
+  "symbol": "LPTUSDT",
+  "markPrice": "1.36482157",
+  "indexPrice": "1.36616176",
+  "estimatedSettlePrice": "1.37341410",
+  "lastFundingRate": "0.00005000",
+  "interestRate": "0.00010000",
+  "nextFundingTime": 1789488000000,
+  "time": 1789479760002
+ }
+]

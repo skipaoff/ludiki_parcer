@@ -23,6 +23,7 @@ from app.core.schemas import Instrument, LegSide
 from app.core.symbols import parse_symbol
 from app.exchanges.base import Balance, ClockProbe, FillReport, OrderReport, Position
 from app.exchanges.ccxt_support import describe_error, error_code, is_unknown_outcome_error, now_ms, parse, step, to_bool
+from app.system.tls import with_shared_context
 
 FEE_REFERENCE_SYMBOL = "BTCUSDT"
 
@@ -256,17 +257,17 @@ class BinanceAdapter:
         timeout_s: float = 10,
     ) -> None:
         self._demo = demo
-        self._client = ccxt.binanceusdm(
+        self._client = with_shared_context(ccxt.binanceusdm(
             {
                 "apiKey": api_key or "",
                 "secret": api_secret or "",
                 "enableRateLimit": True,
                 "timeout": int(timeout_s * 1000),
             }
-        )
+        ))
         # Probes get their own client: in the shared one ccxt's rate limiter queues them behind heavy catalog
         # requests (ticker/24hr costs 40), which showed up as multi-second pings.
-        self._probe_client = ccxt.binanceusdm({"enableRateLimit": False, "timeout": int(timeout_s * 1000)})
+        self._probe_client = with_shared_context(ccxt.binanceusdm({"enableRateLimit": False, "timeout": int(timeout_s * 1000)}))
         if demo:
             self._client.enable_demo_trading(True)
             self._probe_client.enable_demo_trading(True)

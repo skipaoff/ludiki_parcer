@@ -1,0 +1,39 @@
+{
+ "success": true,
+ "code": 0,
+ "data": [
+  {
+   "symbol": "BTC_USDT",
+   "fundingRate": 8.7e-05,
+   "maxFundingRate": 0.0018,
+   "minFundingRate": -0.0018,
+   "collectCycle": 8,
+   "nextSettleTime": 1789488000000,
+   "timestamp": 1789479760463,
+   "idxPrice": 76419.3,
+   "fairPrice": 76393.7
+  },
+  {
+   "symbol": "PEPE_USDT",
+   "fundingRate": 0.0001,
+   "maxFundingRate": 0.03,
+   "minFundingRate": -0.03,
+   "collectCycle": 8,
+   "nextSettleTime": 1789488000000,
+   "timestamp": 1789479760463,
+   "idxPrice": 3.4593e-06,
+   "fairPrice": 3.4577e-06
+  },
+  {
+   "symbol": "LSK_USDT",
+   "fundingRate": -0.002002,
+   "maxFundingRate": 0.03,
+   "minFundingRate": -0.03,
+   "collectCycle": 1,
+   "nextSettleTime": 1789480800000,
+   "timestamp": 1789479760463,
+   "idxPrice": 0.37695,
+   "fairPrice": 0.37098
+  }
+ ]
+}

@@ -1,5 +1,5 @@
 """
-VFP: Every tick, turns live market data into the gap feed — best-price radar over all pairs, order books for candidates, book-based ROI, capacity, exit spread and the lifecycle of each gap.
+VFP: Every tick, turns live market data into the gap feed — best-price radar over all pairs, order books for candidates, book-based ROI, capacity, exit spread, funding over the horizon, expected result and interest, and the lifecycle of each gap.
 Changes when: how gaps are found, measured or presented changes (PLAN.md, sections 5, 7 and 8).
 Anti-goal:
 1. ROI from best prices in the feed — only book-based ROI on the configured size is shown as ROI.
@@ -21,6 +21,8 @@ from typing import Any, Callable, Mapping, Protocol
 
 from app.config.settings import FeedSettings
 from app.core.episodes import EpisodeRules, EpisodeState, EventKind, Phase, Sample, end, step
+from app.core.funding import FundingRate, pair_funding
+from app.core.interest import interest
 from app.core.links import trade_url
 from app.core.qty import QtyRejected, plan_quantity
 from app.core.radar import TopCheck, TopRoi, best_price_roi, choose_books, leg_fresh
@@ -39,6 +41,7 @@ TOP_STALE_MS = 60_000  # radar only ranks candidates; quiet contracts are re-see
 RESUBSCRIBE_COOLDOWN_MS = 5_000
 RADAR_SLICES = 5  # a large catalog's radar is refreshed over this many ticks
 RADAR_FULL_PASS_PAIRS = 500  # up to this many pairs the whole radar is refreshed every tick
+RADAR_PAIRS_PER_TOKEN = 10  # the radar lists coins; each coin brings at most this many of its pairs
 _net_roi = attrgetter("roi_net_pct")
 
 
@@ -83,8 +86,10 @@ def _text(value: Decimal | None, digits: int = 8) -> str | None:
     return format(rounded.normalize(), "f")
 
 
-def _ms(value: float | None) -> int | None:
-    return None if value is None else int(value)
+def _rate_view(rate: FundingRate | None) -> dict[str, Any] | None:
+    if rate is None:
+        return None
+    return {"rate_pct": _text(rate.rate_pct, 4), "interval_h": _text(rate.interval_hours, 3)}
 
 
 def _worth_watching(record: PairRecord) -> bool:
@@ -111,11 +116,14 @@ class PriceGapEngine:
         sink: EpisodeSink | None = None,
         pinned: Callable[[], list[str]] = lambda: [],
         fresh_ms_overrides: Mapping[str, int] | None = None,
+        funding: Callable[[str, str], FundingRate | None] = lambda exchange, symbol: None,
     ) -> None:
         """
         feeds maps an exchange name to its order-book subscriptions; on_catalog receives every catalog contract;
-        fresh_ms_overrides gives venues with slower quotes their own freshness limit (their quotes need no confirmation).
+        fresh_ms_overrides gives venues with slower quotes their own freshness limit (their quotes need no confirmation);
+        funding(exchange, raw symbol) gives the current funding rate of a contract, None when unknown.
         """
+        self._funding = funding
         self._fresh_overrides = dict(fresh_ms_overrides or {})
         self._sink: EpisodeSink = sink or NullSink()
         self._pinned = pinned
@@ -442,31 +450,60 @@ class PriceGapEngine:
             block = "no_book"
         elif quote.problem:
             block = quote.problem
+        size = self._settings.size_usd
+        lifetime_ms = int(now - episode.detected_ms) if episode else None
+        profit_pct = quote.roi_net_pct if quote else None
+        funding = None
+        funding_view = None
+        if long is not None and short is not None:
+            rate_long, rate_short = self._funding(long.exchange, long.symbol_raw), self._funding(short.exchange, short.symbol_raw)
+            funding = pair_funding(rate_long, rate_short, int(now), self._settings.funding_horizon_h)
+            funding_view = {
+                "long": _rate_view(rate_long),
+                "short": _rate_view(rate_short),
+                "hourly_pct": _text(funding.hourly_pct, 4) if funding else None,
+                "horizon_pct": _text(funding.horizon_pct, 4) if funding else None,
+                "horizon_usd": _text(funding.horizon_pct * size / 100, 4) if funding else None,
+                "next_ms": funding.next_ms if funding else None,
+                "next_usd": _text(funding.next_pct * size / 100, 4) if funding and funding.next_pct is not None else None,
+            }
+        # Expected result: the spread after book and fees if prices converge, plus funding over the horizon.
+        total_pct = None if profit_pct is None else profit_pct + (funding.horizon_pct if funding else Decimal(0))
+        score = None
+        if block != "stale":
+            score = interest(
+                total_pct,
+                quote.capacity_usd if quote else None,
+                size,
+                lifetime_ms,
+                assessment.volume24h_weak_usd,
+                record.suspicious or record.blacklisted,
+            )
         return {
             "key": record.key,
             "token": assessment.token,
             "long": None if long is None else {"exchange": long.exchange, "symbol": long.symbol_raw, "url": trade_url(long)},
             "short": None if short is None else {"exchange": short.exchange, "symbol": short.symbol_raw, "url": trade_url(short)},
-            "long_avg": _text(quote.long_avg) if quote else None,
-            "short_avg": _text(quote.short_avg) if quote else None,
             "qty_tokens": _text(quote.qty_tokens, 12) if quote else None,
+            # Profit in % of the size: book-based entry spread minus round-trip taker fees, if prices converge.
             "roi_net_pct": _text(quote.roi_net_pct, 4) if quote else None,
-            "roi_gross_pct": _text(quote.roi_gross_pct, 4) if quote else None,
-            "roi_top_pct": None if top is None else round(top.roi_net_pct, 4),
-            # Same measure in three places — short minus long price in %, before fees: best prices, book on size, exit.
-            "top_gross_pct": None if top is None else round(top.gross_pct, 4),
-            "exit_spread_pct": _text(quote.exit_spread_pct, 4) if quote else None,
             "capacity_usd": _text(quote.capacity_usd, 6) if quote else None,
-            "age_long_ms": _ms(quote.age_long_ms) if quote else None,
-            "age_short_ms": _ms(quote.age_short_ms) if quote else None,
             "phase": episode.phase.value if episode else None,
             # Counted from the moment the gap appeared, so a feed row shows at least the required minimum lifetime.
-            "lifetime_ms": int(now - episode.detected_ms) if episode else None,
-            "roi_peak_pct": _text(episode.roi_peak, 4) if episode else None,
+            "lifetime_ms": lifetime_ms,
             "volume24h_weak_usd": _text(assessment.volume24h_weak_usd, 6),
             "suspicious": record.suspicious,
             "blacklisted": record.blacklisted,
             "block": block,
+            "profit_usd": None if profit_pct is None else _text(profit_pct * size / 100, 4),
+            "funding": funding_view,
+            "total_pct": _text(total_pct, 4),
+            "total_usd": None if total_pct is None else _text(total_pct * size / 100, 4),
+            "funding_known": funding is not None,
+            "score": None if score is None else score.score,
+            "score_parts": None
+            if score is None
+            else {"result": score.result, "depth": score.depth, "stability": score.stability, "liquidity": score.liquidity},
         }
 
     def _is_current_direction(self, episode_key: str) -> bool:
@@ -495,17 +532,22 @@ class PriceGapEngine:
             rows.append(self._row(record, self._quotes.get(pair_key), tops_by_key.get(pair_key), now, episode))
         rows.sort(key=lambda row: Decimal(row["roi_net_pct"] or "-1000"), reverse=True)
 
+        # The radar lists coins: the best current spreads bring their coin in, with that coin's other pairs alongside.
+        episodes_by_pair = {self._episode_pair[key]: state for key, state in self._episodes.items() if key in self._episode_pair}
         radar = []
+        pairs_per_token: dict[str, int] = {}
         for top in self._tops:
-            if len(radar) >= self._settings.radar_rows:
-                break
             if top.key in in_feed_pairs:
                 continue
             record = self._records[top.key]
-            episode = next(
-                (state for key, state in self._episodes.items() if self._episode_pair.get(key) == top.key), None
-            )
-            radar.append(self._row(record, self._quotes.get(top.key), top, now, episode))
+            token = record.assessment.token
+            taken = pairs_per_token.get(token)
+            if taken is None and len(pairs_per_token) >= self._settings.radar_rows:
+                continue
+            if taken is not None and taken >= RADAR_PAIRS_PER_TOKEN:
+                continue
+            pairs_per_token[token] = (taken or 0) + 1
+            radar.append(self._row(record, self._quotes.get(top.key), top, now, episodes_by_pair.get(top.key)))
 
         return {
             "rows": rows,
@@ -514,6 +556,7 @@ class PriceGapEngine:
                 "size_usd": _text(self._settings.size_usd),
                 "min_roi_pct": _text(self._settings.min_roi_pct),
                 "enter_after_ms": self._settings.enter_after_ms,
+                "funding_horizon_h": _text(self._settings.funding_horizon_h),
                 "fresh_ms": self._settings.fresh_ms,
                 "taker_fee_pct": {exchange: _text(self._taker_fee_pct(exchange)) for exchange in self._feeds},
             },

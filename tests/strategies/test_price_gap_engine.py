@@ -94,7 +94,6 @@ def test_gap_enters_the_feed_after_holding_above_threshold():
     assert Decimal(row["capacity_usd"]) > 0
     assert row["block"] is None
     assert row["lifetime_ms"] == 400  # counted from the first sighting, not from entering the feed
-    assert row["top_gross_pct"] == round(float(row["roi_top_pct"]) + 0.2, 4)
 
 
 def test_default_45_second_rule_keeps_short_gaps_out_and_their_books_in():
@@ -245,3 +244,63 @@ def test_large_catalog_radar_is_refreshed_a_slice_per_tick():
     catalog._records = records[:10]  # pairs that leave the catalog leave the radar at once
     engine.tick()
     assert {top.key for top in engine._tops} <= {record.key for record in records[:10]}
+
+
+def test_rows_carry_profit_funding_result_and_interest():
+    from app.core.funding import FundingRate
+
+    clock = Clock()
+    state = MarketState(clock)
+    rates = {
+        ("mexc", "SOL_USDT"): FundingRate(Decimal("0.01"), Decimal(8), int(clock.now) + 600_000),  # the long pays once in 8 h
+        ("binance", "SOLUSDT"): FundingRate(Decimal("-0.02"), Decimal(4), int(clock.now) + 3_600_000),  # the short pays twice
+    }
+    engine = PriceGapEngine(
+        Catalog([sol_record()]), state, {"binance": FakeFeed(clock), "mexc": FakeFeed(clock)},
+        FeedSettings(size_usd=Decimal("1000"), min_roi_pct=Decimal("0.5"), enter_after_ms=300), lambda exchange: Decimal("0.05"),
+        lambda instruments: None, clock, funding=lambda exchange, symbol: rates.get((exchange, symbol)),
+    )
+    engine.tick()
+    push_market(state)
+    engine.tick()
+    clock.now += 400
+    push_market(state)
+    engine.tick()
+
+    row = engine.view()["rows"][0]
+    assert Decimal(row["profit_usd"]) == Decimal("10")  # 1.0 % of $1000
+    assert row["funding"]["long"] == {"rate_pct": "0.01", "interval_h": "8"}
+    assert Decimal(row["funding"]["horizon_pct"]) == Decimal("-0.01") - Decimal("0.04")
+    assert Decimal(row["funding"]["horizon_usd"]) == Decimal("-0.5")
+    assert Decimal(row["funding"]["next_usd"]) == Decimal("-0.1")
+    assert Decimal(row["total_pct"]) == Decimal("0.95") and Decimal(row["total_usd"]) == Decimal("9.5")
+    assert row["funding_known"] is True
+    assert row["score"] == sum(row["score_parts"].values()) and row["score"] > 0
+
+
+def test_radar_lists_coins_with_their_pairs():
+    from app.strategies.price_gap import engine as engine_module
+
+    quote = Quote(mark=Decimal("100"), index=Decimal("100"))
+    records = []
+    exchanges = ["binance", "mexc", "gate", "aster", "bingx"]
+    for coin in ("AAA", "BBB", "CCC"):
+        for index, a in enumerate(exchanges):
+            for b in exchanges[index + 1 :]:
+                left, right = instrument(a, f"{coin}-{a}", coin), instrument(b, f"{coin}-{b}", coin)
+                records.append(PairRecord(key=f"{a}:{coin}|{b}:{coin}", assessment=assess_pair(left, right, quote, quote)))
+    clock = Clock()
+    state = MarketState(clock)
+    engine = PriceGapEngine(Catalog(records), state, {name: FakeFeed(clock) for name in exchanges},
+                            FeedSettings(radar_rows=2), lambda exchange: Decimal("0.05"), lambda instruments: None, clock)
+    engine.tick()
+    for spread, coin in ((3.0, "AAA"), (2.0, "BBB"), (1.0, "CCC")):
+        for position, exchange in enumerate(exchanges):
+            price = 100 + spread * position / 10
+            state.set_top(exchange, f"{coin}-{exchange}", price, price + 0.01, 1)
+    engine.tick()
+
+    radar = engine.view()["radar"]
+    coins = [row["token"] for row in radar]
+    assert set(coins) == {"AAA", "BBB"}  # two coins, the widest spreads
+    assert coins.count("AAA") == 10 == engine_module.RADAR_PAIRS_PER_TOKEN  # every pair of a coin on five exchanges

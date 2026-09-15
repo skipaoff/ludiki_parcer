@@ -41,6 +41,7 @@ from app.exchanges.binance.adapter import (
     units_text,
 )
 from app.exchanges.ccxt_support import describe_error, error_code, is_unknown_outcome_error, now_ms, parse, step
+from app.system.tls import with_shared_context
 
 EXCHANGE = "aster"
 FEE_REFERENCE_SYMBOL = "BTCUSDT"
@@ -53,7 +54,7 @@ def valid_keys(user_address: str, signer_private_key: str) -> bool:
 
 
 def _client(user_address: str | None, signer_private_key: str | None, timeout_s: float, rate_limit: bool) -> Any:
-    client = ccxt.aster({"privateKey": signer_private_key or "", "enableRateLimit": rate_limit, "timeout": int(timeout_s * 1000)})
+    client = with_shared_context(ccxt.aster({"privateKey": signer_private_key or "", "enableRateLimit": rate_limit, "timeout": int(timeout_s * 1000)}))
     if user_address and signer_private_key:
         # ccxt takes the "user" of a request from the signing key's own address. The terminal signs with an API wallet
         # on behalf of the main wallet, so the cached address is pinned to the main wallet and the signer set apart.

@@ -118,25 +118,31 @@ export interface FeedRow {
   token: string;
   long: FeedLeg | null;
   short: FeedLeg | null;
-  long_avg: string | null;
-  short_avg: string | null;
   qty_tokens: string | null;
   roi_net_pct: string | null;
-  roi_gross_pct: string | null;
-  roi_top_pct: number | null;
-  top_gross_pct: number | null;
-  exit_spread_pct: string | null;
   capacity_usd: string | null;
-  age_long_ms: number | null;
-  age_short_ms: number | null;
   phase: "candidate" | "in_feed" | "tracking" | null;
   lifetime_ms: number | null;
-  roi_peak_pct: string | null;
   volume24h_weak_usd: string | null;
   suspicious: boolean;
   blacklisted: boolean;
   block: string | null;
   open_blocks?: string[];
+  profit_usd: string | null;
+  funding: {
+    long: { rate_pct: string; interval_h: string } | null;
+    short: { rate_pct: string; interval_h: string } | null;
+    hourly_pct: string | null;
+    horizon_pct: string | null;
+    horizon_usd: string | null;
+    next_ms: number | null;
+    next_usd: string | null;
+  } | null;
+  funding_known: boolean;
+  total_pct: string | null;
+  total_usd: string | null;
+  score: number | null;
+  score_parts: { result: number; depth: number; stability: number; liquidity: number } | null;
 }
 
 export interface TradingStatus {
@@ -152,9 +158,17 @@ export interface TradingStatus {
 export interface FeedView {
   rows: FeedRow[];
   radar: FeedRow[];
-  settings?: { size_usd: string; min_roi_pct: string; enter_after_ms: number; fresh_ms: number; taker_fee_pct: Record<string, string> };
+  settings?: {
+    size_usd: string;
+    min_roi_pct: string;
+    enter_after_ms: number;
+    funding_horizon_h: string;
+    fresh_ms: number;
+    taker_fee_pct: Record<string, string>;
+  };
   stats: Record<string, number>;
   streams?: Record<string, Partial<Record<"connections" | "sockets" | "depth_symbols" | "polls" | "poll_errors" | "listings" | "reconnects", number>>>;
+  funding?: Record<string, { contracts: number; age_s: number | null; errors: number }>;
 }
 
 export interface TradeCard {
@@ -171,6 +185,14 @@ export interface TradeCard {
   entry_spread_pct?: string | null;
   exit_spread_pct?: string | null;
   pnl_now_usd?: string | null;
+  pnl_now_pct?: string | null;
+  long_now?: string | null;
+  short_now?: string | null;
+  funding_long?: { rate_pct: string; interval_h: string } | null;
+  funding_short?: { rate_pct: string; interval_h: string } | null;
+  funding_hourly_usd?: string | null;
+  funding_next_ms?: number | null;
+  funding_next_usd?: string | null;
   liq_worst_pct?: string | null;
   liq_long_pct?: string | null;
   liq_short_pct?: string | null;

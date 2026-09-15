@@ -24,6 +24,7 @@ EDITABLE = {
     "size_usd": (Decimal("5"), Decimal("1000000")),
     "min_roi_pct": (Decimal("-5"), Decimal("50")),
     "enter_after_ms": (Decimal("0"), Decimal("3600000")),
+    "funding_horizon_h": (Decimal("1"), Decimal("168")),
 }
 WHOLE_NUMBERS = frozenset({"enter_after_ms"})
 

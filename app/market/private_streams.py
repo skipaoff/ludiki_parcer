@@ -18,6 +18,8 @@ from typing import Any, Callable
 import orjson
 import websockets
 
+from app.system.tls import shared_context
+
 log = logging.getLogger(__name__)
 
 BINANCE_WS = "wss://fstream.binance.com/ws/"
@@ -125,7 +127,7 @@ class PrivateStreams:
     async def _binance_once(self) -> None:
         adapter = self._adapter("binance")
         listen_key = await adapter.create_listen_key()
-        async with websockets.connect(BINANCE_WS + listen_key, open_timeout=10, close_timeout=2, max_size=2**22) as socket:
+        async with websockets.connect(BINANCE_WS + listen_key, open_timeout=10, close_timeout=2, ssl=shared_context(), max_size=2**22) as socket:
             self.connected["binance"] = True
             keepalive = asyncio.create_task(self._binance_keepalive(adapter))
             try:
@@ -145,7 +147,7 @@ class PrivateStreams:
 
     async def _mexc_once(self) -> None:
         adapter = self._adapter("mexc")
-        async with websockets.connect(MEXC_WS, open_timeout=10, close_timeout=2, max_size=2**22) as socket:
+        async with websockets.connect(MEXC_WS, open_timeout=10, close_timeout=2, ssl=shared_context(), max_size=2**22) as socket:
             await socket.send(adapter.login_message(int(time.time() * 1000)))
             pinger = asyncio.create_task(self._mexc_ping(socket))
             try:

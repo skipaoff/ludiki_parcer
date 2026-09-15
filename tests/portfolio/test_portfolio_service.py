@@ -3,6 +3,7 @@ from decimal import Decimal
 import pytest
 
 from app.config.settings import PortfolioSettings
+from app.core.funding import FundingRate
 from app.core.schemas import LegSide
 from app.exchanges.base import Balance, Position
 from app.journal.journal import Journal
@@ -55,7 +56,7 @@ def leg(exchange, symbol, side, qty, entry, liquidation):
     return Position(exchange, symbol, "SOL", side, Decimal(qty), Decimal(entry), None, Decimal(liquidation), 3, "isolated")
 
 
-def build(positions_binance, positions_mexc):
+def build(positions_binance, positions_mexc, funding=lambda exchange, symbol: None):
     clock = Clock()
     state = MarketState(lambda: clock.now)
     record = sol_record(pair_id=5)
@@ -75,6 +76,7 @@ def build(positions_binance, positions_mexc):
         lambda exchange: Decimal("0.05"),
         on_active_change=active.append,
         clock_ms=clock,
+        funding=funding,
     )
     return service, state, clock, adapters, rows, events, active, record
 
@@ -82,7 +84,11 @@ def build(positions_binance, positions_mexc):
 async def test_manual_legs_are_foreign_until_assigned_then_monitored():
     long = leg("mexc", "SOL_USDT", LegSide.LONG, "10.05", "100", "70")
     short = leg("binance", "SOLUSDT", LegSide.SHORT, "10", "101.2", "130")
-    service, state, clock, adapters, rows, events, active, record = build([short], [long])
+    rates = {
+        ("mexc", "SOL_USDT"): FundingRate(Decimal("0.01"), Decimal(8), int(Clock().now) + 600_000),
+        ("binance", "SOLUSDT"): FundingRate(Decimal("0.02"), Decimal(4), int(Clock().now) + 3_600_000),
+    }
+    service, state, clock, adapters, rows, events, active, record = build([short], [long], lambda exchange, symbol: rates.get((exchange, symbol)))
 
     await service.poll_positions()
     snapshot = service.snapshot()
@@ -112,6 +118,13 @@ async def test_manual_legs_are_foreign_until_assigned_then_monitored():
     assert Decimal(card["pnl_now_usd"]) < Decimal("10")
     # Worst leg is the short: mark 101.1 against liquidation 130 is 28.59 % away (the long is 30.69 % away).
     assert Decimal(card["liq_worst_pct"]) == Decimal("28.59")
+    # Live prices are what closing now gets: the long sells at the MEXC bid, the short buys at the Binance ask.
+    assert (card["long_now"], card["short_now"]) == ("101", "101.2")
+    assert Decimal(card["pnl_now_pct"]) == Decimal(card["pnl_now_usd"]) / 1000 * 100
+    # Notional 10 SOL × 100 = $1000. Next settlement is the MEXC long paying 0.01 % = −$0.10; per hour 0.02/4 − 0.01/8 %.
+    assert card["funding_long"] == {"rate_pct": "0.01", "interval_h": "8"}
+    assert Decimal(card["funding_next_usd"]) == Decimal("-0.1")
+    assert Decimal(card["funding_hourly_usd"]) == Decimal("0.0375")
     assert any(table == "position_samples" for table, _ in rows)
 
 

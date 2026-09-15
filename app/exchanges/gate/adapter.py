@@ -24,6 +24,7 @@ from app.core.schemas import Instrument, LegSide
 from app.core.symbols import parse_symbol
 from app.exchanges.base import Balance, ClockProbe, FillReport, OrderReport, Position
 from app.exchanges.ccxt_support import describe_error, error_code, is_unknown_outcome_error, now_ms, parse, step
+from app.system.tls import with_shared_context
 
 SETTLE = {"settle": "usdt"}
 FEE_REFERENCE_CONTRACT = "BTC_USDT"
@@ -236,7 +237,7 @@ class GateAdapter:
     name = "gate"
 
     def __init__(self, api_key: str | None = None, api_secret: str | None = None, timeout_s: float = 10) -> None:
-        self._client = ccxt.gate(
+        self._client = with_shared_context(ccxt.gate(
             {
                 "apiKey": api_key or "",
                 "secret": api_secret or "",
@@ -244,9 +245,9 @@ class GateAdapter:
                 "timeout": int(timeout_s * 1000),
                 "options": {"defaultType": "swap"},
             }
-        )
+        ))
         # Probes get their own client so the rate limiter never queues them behind catalog requests.
-        self._probe_client = ccxt.gate({"enableRateLimit": False, "timeout": int(timeout_s * 1000)})
+        self._probe_client = with_shared_context(ccxt.gate({"enableRateLimit": False, "timeout": int(timeout_s * 1000)}))
 
     async def close(self) -> None:
         await self._client.close()

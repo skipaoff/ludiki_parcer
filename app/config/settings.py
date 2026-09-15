@@ -132,7 +132,8 @@ class FeedSettings(_Section):
     candidate_margin_pct: Decimal = Field(default=Decimal("0.50"), ge=0)
     book_limit: int = Field(default=60, ge=2, le=200)
     tracking_limit: int = Field(default=20, ge=0, le=200)
-    radar_rows: int = Field(default=20, ge=0, le=100)
+    radar_rows: int = Field(default=20, ge=0, le=100)  # coins in the radar, each with up to RADAR_PAIRS_PER_TOKEN pairs
+    funding_horizon_h: Decimal = Field(default=Decimal("8"), ge=1, le=168)  # funding counted into the expected result
     fresh_ms: int = Field(default=1000, ge=100)
     quiet_book_max_ms: int = Field(default=10000, ge=1000)
     resubscribe_after_ms: int = Field(default=5000, ge=1000)

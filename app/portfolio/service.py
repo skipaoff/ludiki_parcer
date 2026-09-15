@@ -18,6 +18,7 @@ from decimal import Decimal
 from typing import Any, Callable
 
 from app.config.settings import PortfolioSettings
+from app.core.funding import FundingRate, pair_funding
 from app.core.portfolio import (
     TradeLegs,
     entry_spread_pct,
@@ -40,6 +41,7 @@ log = logging.getLogger(__name__)
 
 ACTIVE_STATUSES = ("opening", "open", "closing", "leg_lost")
 MISSING_POLLS_FOR_LOST = 2
+FUNDING_VIEW_HORIZON_H = Decimal(24)  # enough to reach the next settlement of any interval in use (1 to 24 h)
 
 
 class PortfolioError(ValueError):
@@ -169,8 +171,13 @@ class PortfolioService:
         on_active_change: Callable[[bool], None] = lambda active: None,
         clock_ms: Callable[[], float] = lambda: time.time() * 1000,
         ids: LocalIds | None = None,
+        funding: Callable[[str, str], FundingRate | None] = lambda exchange, symbol: None,
     ) -> None:
-        """exchanges is app.exchanges.service.ExchangeService, catalog is app.instruments.service.InstrumentService."""
+        """
+        exchanges is app.exchanges.service.ExchangeService, catalog is app.instruments.service.InstrumentService;
+        funding(exchange, raw symbol) gives the current funding rate of a contract.
+        """
+        self._funding = funding
         self._exchanges = exchanges
         self._catalog = catalog
         self._state = state
@@ -414,10 +421,22 @@ class PortfolioService:
                 short_position.liquidation_price if short_position else None,
             )
             book_ages = [self._state.book_age_ms(key) for key in (long_key, short_key)]
+            notional = trade.qty_tokens * trade.entry_long_avg
+            rate_long, rate_short = self._funding(*long_key), self._funding(*short_key)
+            funding = pair_funding(rate_long, rate_short, now, FUNDING_VIEW_HORIZON_H)
             trade.metrics = {
                 "entry_spread_pct": _text(metrics.entry_spread_pct, 4),
                 "exit_spread_pct": _text(metrics.exit_spread_pct, 4),
                 "pnl_now_usd": _text(metrics.pnl_now_usd, 6),
+                "pnl_now_pct": _text(metrics.pnl_now_usd / notional * 100, 4) if metrics.pnl_now_usd is not None and notional else None,
+                # What closing now would get per token: the long sells into bids, the short buys from asks.
+                "long_now": _text(exit.long_exit_avg) if exit else _text(mark_long),
+                "short_now": _text(exit.short_exit_avg) if exit else _text(mark_short),
+                "funding_long": None if rate_long is None else {"rate_pct": _text(rate_long.rate_pct, 4), "interval_h": _text(rate_long.interval_hours, 3)},
+                "funding_short": None if rate_short is None else {"rate_pct": _text(rate_short.rate_pct, 4), "interval_h": _text(rate_short.interval_hours, 3)},
+                "funding_hourly_usd": _text(funding.hourly_pct * notional / 100, 6) if funding else None,
+                "funding_next_ms": funding.next_ms if funding else None,
+                "funding_next_usd": _text(funding.next_pct * notional / 100, 6) if funding and funding.next_pct is not None else None,
                 "liq_long_pct": _text(metrics.liq_distance_long_pct, 4),
                 "liq_short_pct": _text(metrics.liq_distance_short_pct, 4),
                 "liq_worst_pct": _text(metrics.worst_liquidation_pct, 4),

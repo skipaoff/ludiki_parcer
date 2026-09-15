@@ -20,6 +20,7 @@ from typing import Any, Awaitable, Callable, Protocol
 import orjson
 from fastapi import Depends, FastAPI, HTTPException, Query, Request, WebSocket
 from fastapi.responses import HTMLResponse, PlainTextResponse
+from starlette.middleware.gzip import GZipMiddleware
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 from starlette.staticfiles import StaticFiles
 
@@ -80,6 +81,9 @@ def allowed_origins(server: ServerSettings) -> frozenset[str]:
 def create_app(server: ServerSettings, web_dist: Path, context: ApiContext) -> FastAPI:
     app = FastAPI(title=APP_NAME, docs_url=None, redoc_url=None, openapi_url=None)
     app.add_middleware(TrustedHostMiddleware, allowed_hosts=ALLOWED_HOSTS)
+    # Large uncompressed answers over loopback were cut off after ~19 s about one time in four on the dev machine
+    # (antivirus web shield, 15.09.2026); compressed they pass. Websocket frames are not affected.
+    app.add_middleware(GZipMiddleware, minimum_size=4096)
     origins = allowed_origins(server)
 
     def require_token(request: Request) -> None:

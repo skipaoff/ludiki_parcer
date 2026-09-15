@@ -1,10 +1,11 @@
-// VFP: The open-pairs column — a card per pair with exit spread, PnL now and liquidation distance, foreign positions and the accounts behind them.
+// VFP: The open-pairs column — a card per pair with live prices, funding and profit if closed now by the books, foreign positions and the accounts behind them.
 // Changes when: what an open pair shows, or the read-only actions on it, change (PLAN.md, sections 3.1 and 10).
 // Anti-goal:
 // 1. Order buttons active while trading is disabled — they stay disabled with the reason.
-// 2. Red for anything but emergencies — only a lost leg or a near liquidation is red.
+// 2. Colour without meaning — green and red mark money made and lost; a red border marks a lost leg or a near liquidation.
 
 import { useEffect, useState } from "react";
+import { price, rateText, signClass, signedPct, signedUsd, until } from "./money";
 import { compact } from "./Pairs";
 import { apiSend } from "./session";
 import { explainFailure, tradingAction } from "./trading";
@@ -17,21 +18,8 @@ const ISSUE_TEXT: Record<string, string> = {
   short_qty_mismatch: "количество шорта не совпадает",
 };
 
-function signedUsd(value: string | null | undefined): string {
-  if (value == null) return "—";
-  const number = Number(value);
-  return `${number > 0 ? "+" : number < 0 ? "−" : ""}$${Math.abs(number).toFixed(2)}`;
-}
-
 function pct(value: string | null | undefined, digits = 2): string {
   return value == null ? "—" : `${Number(value).toFixed(digits)}%`;
-}
-
-function price(value: string | null): string {
-  if (value === null) return "—";
-  const number = Number(value);
-  if (number >= 1) return number.toLocaleString("en-US", { maximumFractionDigits: 4 });
-  return number.toFixed(Math.min(15, 4 - Math.floor(Math.log10(number))));
 }
 
 function inTrade(openedMs: number, nowMs: number): string {
@@ -76,7 +64,11 @@ export function PortfolioColumn({ token, snapshot }: { token: string; snapshot: 
     <aside className="pairs">
       <div className="toolbar">
         <span>
-          ОТКРЫТЫЕ ПАРЫ {snapshot?.pairs.open ?? 0}/{snapshot?.pairs.limit ?? 0}
+          ОТКРЫТЫЕ ПАРЫ {snapshot?.pairs.open ?? 0}
+          <span className="muted" title="риск-лимит одновременно открытых пар: [trading] max_open_pairs в config.toml">
+            {" "}
+            · лимит {snapshot?.pairs.limit ?? 0}
+          </span>
           {snapshot?.pairs.sleep_blocked ? <span className="muted"> · сон Windows запрещён</span> : null}
         </span>
         <button
@@ -205,29 +197,47 @@ function PairCard({
   const status =
     transitional ??
     (lost ? "НОГА ПОТЕРЯНА" : trade.issues.length ? trade.issues.map((issue) => ISSUE_TEXT[issue] ?? issue).join(", ") : stale ? "нет данных" : "открыта");
+  const nextFunding =
+    trade.funding_next_ms != null && trade.funding_next_usd != null
+      ? ` · след. ${signedUsd(trade.funding_next_usd)} через ${until(trade.funding_next_ms, now)}`
+      : "";
   return (
     <div className={lost ? "pair-card alarm" : "pair-card"}>
       <div className="row-line">
         <span className="strong">{trade.token}</span>
-        <span>
-          L {trade.long.exchange.toUpperCase()} {price(trade.long.entry)} · S {trade.short.exchange.toUpperCase()} {price(trade.short.entry)}
+        <span
+          className={`strong ${signClass(trade.pnl_now_usd)}`}
+          title="профит, если закрыть обе ноги сейчас по стаканам: разница цен входа и выхода, комиссии и полученный фандинг"
+        >
+          {signedUsd(trade.pnl_now_usd)} {trade.pnl_now_pct != null && signedPct(trade.pnl_now_pct)}
         </span>
       </div>
       <div className="row-line">
         <span>
-          {trade.qty_tokens} {trade.token}
+          ЛОНГ {trade.long.exchange.toUpperCase()} {price(trade.long.entry)} → <span className="strong">{price(trade.long_now)}</span>
         </span>
-        <span>
-          вход {pct(trade.entry_spread_pct)} → выход {pct(trade.exit_spread_pct)}
+        <span className="muted" title="ставка фандинга биржи за расчёт и интервал">
+          {rateText(trade.funding_long)}
         </span>
       </div>
       <div className="row-line">
-        <span className="strong">PnL сейчас {signedUsd(trade.pnl_now_usd)}</span>
-        <span className={liqNear ? "alarm-text strong" : ""}>до ликв. {pct(trade.liq_worst_pct, 1)}</span>
+        <span>
+          ШОРТ {trade.short.exchange.toUpperCase()} {price(trade.short.entry)} → <span className="strong">{price(trade.short_now)}</span>
+        </span>
+        <span className="muted" title="ставка фандинга биржи за расчёт и интервал">
+          {rateText(trade.funding_short)}
+        </span>
+      </div>
+      <div className="row-line">
+        <span title="фандинг, уже полученный (+) или заплаченный (−) по этой паре, и ближайший расчёт">
+          фандинг <span className={signClass(trade.funding_usd)}>{signedUsd(trade.funding_usd)}</span>
+          <span className={Number(trade.funding_next_usd ?? 0) < 0 ? "loss" : "muted"}>{nextFunding}</span>
+        </span>
+        <span className={liqNear ? "alarm-text strong" : "muted"}>до ликв. {pct(trade.liq_worst_pct, 1)}</span>
       </div>
       <div className="row-line muted">
         <span>
-          {inTrade(trade.opened_at_ms, now)} в сделке · фандинг {signedUsd(trade.funding_usd)} · {status}
+          {trade.qty_tokens} {trade.token} · {inTrade(trade.opened_at_ms, now)} в сделке · {status}
         </span>
         {!lost && (
           <button

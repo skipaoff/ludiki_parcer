@@ -1,0 +1,14 @@
+{
+ "listings": [
+  {
+   "ticker": "BTC",
+   "funding_rate": "0.093954",
+   "funding_interval_s": 28800
+  },
+  {
+   "ticker": "XAUS",
+   "funding_rate": "0",
+   "funding_interval_s": 0
+  }
+ ]
+}
