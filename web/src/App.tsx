@@ -244,12 +244,23 @@ function FeedEngineRows({ snapshot }: { snapshot: Snapshot }) {
         return (
           <div className="row" key={name}>
             <span>{name.toUpperCase()}</span>
-            <span>
+            <span
+              title={
+                "соединений — живых вебсокетов из нужных · стаканов — сколько пар подписано на стакан прямо сейчас · " +
+                "опросов — сколько REST-запросов сделано с запуска · фандинг — ставки скольких контрактов получены и " +
+                "когда обновлялись. Возраст относится только к фандингу: ставки меняются раз в 1–8 часов, опрос раз в минуту. " +
+                "Свежесть цен и стаканов это число не показывает — устаревшую ногу лента гасит сама."
+              }
+            >
               {info.sockets !== undefined ? `соединений ${info.connections}/${info.sockets}` : ""}
               {info.depth_symbols !== undefined ? ` · стаканов ${info.depth_symbols}` : ""}
               {info.polls !== undefined ? ` · опросов ${info.polls}${info.poll_errors ? ` (ошибок ${info.poll_errors})` : ""}` : ""}
               {info.listings !== undefined ? ` · рынков ${info.listings}` : ""}
-              {funding ? ` · фандинг ${funding.contracts} контр.${funding.age_s !== null ? `, ${funding.age_s}с назад` : ", ещё не получен"}` : ""}
+              {funding
+                ? ` · фандинг ${funding.contracts} контр.${
+                    funding.age_s !== null ? `, обновлён ${funding.age_s} с назад` : ", ещё не получен"
+                  }`
+                : ""}
             </span>
           </div>
         );
