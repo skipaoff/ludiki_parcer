@@ -56,6 +56,18 @@ enabled = true              # keys: the main wallet address and the private key 
 [exchanges.bingx]
 enabled = true
 
+[exchanges.bybit]
+enabled = true
+
+[exchanges.bitget]
+enabled = true              # keys: API key, secret and the passphrase set when the key was made
+
+[exchanges.kucoin]
+enabled = true              # keys: API key, secret and the passphrase set when the key was made
+
+[exchanges.hyperliquid]
+enabled = true              # keys: the main wallet address and the private key of an API wallet made for it; quotes are in USDC
+
 [exchanges.variational]
 enabled = true              # read-only: Variational Omni has no trading API yet, its gaps are shown but cannot be opened
 poll_ms = 2000              # public statistics limit is 10 requests per 10 seconds per IP
@@ -86,11 +98,19 @@ default_taker_fee_mexc_pct = 0.05
 default_taker_fee_gate_pct = 0.075     # Gate contract default taker rate
 default_taker_fee_aster_pct = 0.035    # Aster Pro taker rate
 default_taker_fee_bingx_pct = 0.05     # BingX contract default taker rate
+default_taker_fee_bybit_pct = 0.055    # Bybit non-VIP taker rate
+default_taker_fee_bitget_pct = 0.06    # Bitget futures default taker rate
+default_taker_fee_kucoin_pct = 0.06    # KuCoin futures default taker rate
+default_taker_fee_hyperliquid_pct = 0.045  # Hyperliquid base tier taker rate
 default_taker_fee_variational_pct = 0  # Variational charges no fees, it earns on the spread already inside its quotes
 mexc_ticker_poll_ms = 1000      # MEXC best prices come from REST: the all-symbols websocket has no bid/ask
 gate_ticker_poll_ms = 1000      # Gate best prices, mark, index and volume of all contracts in one REST answer
 bingx_ticker_poll_ms = 1000     # BingX best prices from REST: its websocket bookTicker lags behind the order book
 bingx_premium_poll_ms = 5000    # BingX mark and index prices
+bybit_ticker_poll_ms = 1000     # Bybit best prices, mark, index and volume from REST
+bitget_ticker_poll_ms = 1000    # Bitget best prices, mark, index and volume from REST
+kucoin_ticker_poll_ms = 1000    # KuCoin best prices from REST; mark, index and volume every minute
+hyperliquid_poll_ms = 2000      # Hyperliquid impact prices, mark, oracle and volume (weight 20 of 1,200 a minute)
 
 [portfolio]
 positions_poll_s = 5            # positions from REST; needs keys
@@ -107,6 +127,10 @@ leverage_mexc = 3
 leverage_gate = 3
 leverage_aster = 3
 leverage_bingx = 3
+leverage_bybit = 3
+leverage_bitget = 3
+leverage_kucoin = 3
+leverage_hyperliquid = 3
 isolated = true                 # isolated margin on both legs; false means cross
 entry_min_roi_pct = 0.50        # net ROI by book at the moment of the click; below it no orders leave
 max_open_pairs = 3

@@ -173,3 +173,17 @@ def test_pairs_across_every_two_exchanges_keep_a_stable_leg_order():
 def test_zero_fee_venue_changes_round_trip_fees():
     fees = Fees(taker_long_pct=Decimal("0.075"), taker_short_pct=Decimal("0"))
     assert fees.round_trip_pct == Decimal("0.150")
+
+
+async def test_gate_contracts_arrive_in_parallel_pages_until_a_short_one():
+    contracts = [{"name": f"C{index}_USDT"} for index in range(gate.CONTRACTS_PAGE * gate.CONTRACTS_PAGES_AT_ONCE + 37)]
+    requested = []
+
+    async def get_page(params):
+        requested.append(params["offset"])
+        assert params["limit"] == gate.CONTRACTS_PAGE and params["settle"] == "usdt"
+        return contracts[params["offset"] : params["offset"] + params["limit"]]
+
+    fetched = await gate.fetch_contract_pages(get_page)
+    assert [item["name"] for item in fetched] == [item["name"] for item in contracts]
+    assert len(requested) == 2 * gate.CONTRACTS_PAGES_AT_ONCE  # the first wave was all full pages, the second ends short

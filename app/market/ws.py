@@ -12,7 +12,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
-from typing import Callable, Iterable
+from typing import Awaitable, Callable, Iterable
 
 import websockets
 
@@ -28,13 +28,14 @@ class ManagedSocket:
     def __init__(
         self,
         name: str,
-        url: str,
+        url: str | Callable[[], Awaitable[str]],
         on_message: Callable[[str | bytes], str | None],
         build_messages: BuildMessages,
         batch_size: int,
         send_interval_s: float,
         heartbeat: tuple[float, str] | None = None,
     ) -> None:
+        """url may be a coroutine function for exchanges that hand out a fresh address with a token per connection."""
         self.name = name
         self.url = url
         self._on_message = on_message
@@ -63,7 +64,9 @@ class ManagedSocket:
         backoff = 1.0
         while True:
             try:
-                async with websockets.connect(self.url, max_size=2**24, open_timeout=10, close_timeout=2, ssl=shared_context()) as socket:
+                url = self.url if isinstance(self.url, str) else await self.url()
+                ssl = shared_context() if url.startswith("wss:") else None
+                async with websockets.connect(url, max_size=2**24, open_timeout=10, close_timeout=2, ssl=ssl) as socket:
                     self.connected = True
                     backoff = 1.0
                     self._subscribed = set()

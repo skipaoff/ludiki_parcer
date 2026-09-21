@@ -82,3 +82,11 @@ def test_mexc_subscription_messages():
         {"method": "sub.depth.full", "param": {"symbol": "BTC_USDT", "limit": 20}}
     ]
     assert orjson.loads(next(iter(binance_streams.control_messages(["btcusdt@bookTicker"], False))))["method"] == "UNSUBSCRIBE"
+
+
+def test_binance_radar_is_polled_not_streamed():
+    # Binance book tickers arrived 2 s late on the median here and a socket with 200 of them was dropped every ~20 s.
+    streams = binance_streams.binance_streams(MarketState())
+    streams.set_radar(["BTCUSDT", "ETHUSDT"])
+    assert streams._radar == [] and streams._radar_poll_s == binance_streams.RADAR_POLL_S == 1.0
+    assert streams.stats()["radar_streams"] == 0

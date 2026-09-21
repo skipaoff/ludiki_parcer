@@ -237,13 +237,13 @@ def test_large_catalog_radar_is_refreshed_a_slice_per_tick():
     seen = []
     for _ in range(engine_module.RADAR_SLICES):
         engine.tick()
-        seen.append(len(engine._tops))
+        seen.append(len(engine._top_by_key))
     size = -(-count // engine_module.RADAR_SLICES)
     assert seen == [size * step for step in range(1, engine_module.RADAR_SLICES)] + [count]
 
     catalog._records = records[:10]  # pairs that leave the catalog leave the radar at once
     engine.tick()
-    assert {top.key for top in engine._tops} <= {record.key for record in records[:10]}
+    assert set(engine._top_by_key) <= {record.key for record in records[:10]}
 
 
 def test_rows_carry_profit_funding_result_and_interest():
@@ -304,3 +304,74 @@ def test_radar_lists_coins_with_their_pairs():
     coins = [row["token"] for row in radar]
     assert set(coins) == {"AAA", "BBB"}  # two coins, the widest spreads
     assert coins.count("AAA") == 10 == engine_module.RADAR_PAIRS_PER_TOKEN  # every pair of a coin on five exchanges
+
+
+def test_unchanged_books_are_not_walked_again(monkeypatch):
+    from app.strategies.price_gap import engine as engine_module
+
+    walks = []
+    original = engine_module.best_entry
+    monkeypatch.setattr(engine_module, "best_entry", lambda *args: walks.append(1) or original(*args))
+    engine, state, clock, *_ = build(sol_record(), min_roi_pct=Decimal("5"))  # below the threshold: a radar row, no gap
+    engine.tick()
+    push_market(state)
+    engine.tick()  # books chosen and measured
+    assert len(walks) == 1
+    first = engine.view()["radar"][0]
+
+    clock.now += 100
+    engine.tick()  # the same book objects: the numbers and the row are reused
+    assert len(walks) == 1
+    assert engine.view()["radar"][0] is first
+
+    push_market(state, binance_bid="101.50")
+    clock.now += 100
+    engine.tick()
+    assert len(walks) == 2
+    assert Decimal(engine.view()["radar"][0]["roi_net_pct"]) == Decimal("1.5") - Decimal("0.2")
+
+
+def test_tradable_pairs_take_books_before_suspicious_ones():
+    normal = Quote(mark=Decimal("100"), index=Decimal("100"))
+    records = []
+    for coin, index_b in (("AAA", "104"), ("BBB", "100"), ("CCC", "100")):  # AAA has the widest gap but a suspicious index
+        a, b = instrument("binance", f"{coin}USDT", coin), instrument("mexc", f"{coin}_USDT", coin)
+        assessment = assess_pair(a, b, normal, Quote(mark=Decimal("100"), index=Decimal(index_b)))
+        records.append(PairRecord(key=f"binance:{coin}USDT|mexc:{coin}_USDT", assessment=assessment))
+    clock = Clock()
+    state = MarketState(clock)
+    binance, mexc = FakeFeed(clock), FakeFeed(clock)
+    engine = PriceGapEngine(Catalog(records), state, {"binance": binance, "mexc": mexc},
+                            FeedSettings(book_limit=2, min_roi_pct=Decimal("0.5")), lambda exchange: Decimal("0.05"),
+                            lambda instruments: None, clock)
+    engine.tick()
+    for coin, bid in (("AAA", 103.0), ("BBB", 102.0), ("CCC", 101.5)):
+        state.set_top("mexc", f"{coin}_USDT", 99.99, 100.0, 1)
+        state.set_top("binance", f"{coin}USDT", bid, bid + 0.01, 1)
+    engine.tick()
+
+    assert records[0].suspicious and not records[1].suspicious
+    assert sorted(binance.depth) == ["BBBUSDT", "CCCUSDT"]
+
+
+def test_radar_coins_from_tradable_pairs_come_before_suspicious_spreads():
+    normal = Quote(mark=Decimal("100"), index=Decimal("100"))
+    records = []
+    for coin, index_b in (("AAA", "104"), ("BBB", "100"), ("CCC", "100")):
+        a, b = instrument("binance", f"{coin}USDT", coin), instrument("mexc", f"{coin}_USDT", coin)
+        records.append(PairRecord(key=f"binance:{coin}USDT|mexc:{coin}_USDT", assessment=assess_pair(a, b, normal, Quote(mark=Decimal("100"), index=Decimal(index_b)))))
+    clock = Clock()
+    state = MarketState(clock)
+    engine = PriceGapEngine(Catalog(records), state, {"binance": FakeFeed(clock), "mexc": FakeFeed(clock)},
+                            FeedSettings(radar_rows=2, min_roi_pct=Decimal("5")), lambda exchange: Decimal("0.05"),
+                            lambda instruments: None, clock)
+    engine.tick()
+    for coin, bid in (("AAA", 103.0), ("BBB", 102.0), ("CCC", 101.5)):
+        state.set_top("mexc", f"{coin}_USDT", 99.99, 100.0, 1)
+        state.set_top("binance", f"{coin}USDT", bid, bid + 0.01, 1)
+    engine.tick()
+    assert [row["token"] for row in engine.view()["radar"]] == ["BBB", "CCC"]
+
+    engine.apply_settings(FeedSettings(radar_rows=3, min_roi_pct=Decimal("5")))
+    engine.tick()
+    assert [row["token"] for row in engine.view()["radar"]] == ["BBB", "CCC", "AAA"]

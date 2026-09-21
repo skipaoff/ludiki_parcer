@@ -31,8 +31,12 @@ from app.api.server import APP_NAME, ApiContext, create_app
 from app.config.settings import REPO_ROOT, Settings, load_settings
 from app.exchanges.service import ExchangeService
 from app.instruments.service import InstrumentService
-from app.market.binance_streams import BinanceStreams, aster_streams
+from app.market.binance_streams import aster_streams, binance_streams
 from app.market.bingx_market import BingxMarket
+from app.market.bitget_market import BitgetMarket
+from app.market.bybit_market import BybitMarket
+from app.market.hyperliquid_market import HyperliquidMarket
+from app.market.kucoin_market import KucoinMarket
 from app.market.funding import POLL_S as FUNDING_POLL_S
 from app.market.funding import FundingService
 from app.market.gate_market import GateMarket
@@ -60,6 +64,7 @@ from app.system.log_setup import SecretRedactor, configure_logging
 from app.system.tls import use_system_trust_store
 
 VERSION = "0.1.0"
+HYPERLIQUID_BOOK_FRESH_MS = 2000
 SHUTDOWN_TIMEOUT_S = 10
 
 log = logging.getLogger("app")
@@ -113,8 +118,7 @@ async def _serve(
     market = MarketState()
     feeds: dict[str, Any] = {}
     if "binance" in exchanges.names:
-        binance_streams = BinanceStreams(market)
-        feeds["binance"] = binance_streams
+        feeds["binance"] = binance_streams(market)
     if "mexc" in exchanges.names:
         feeds["mexc"] = MexcMarket(market, settings.feed.mexc_ticker_poll_ms)
     if "gate" in exchanges.names:
@@ -123,6 +127,14 @@ async def _serve(
         feeds["aster"] = aster_streams(market)
     if "bingx" in exchanges.names:
         feeds["bingx"] = BingxMarket(market, settings.feed.bingx_ticker_poll_ms, settings.feed.bingx_premium_poll_ms)
+    if "bybit" in exchanges.names:
+        feeds["bybit"] = BybitMarket(market, settings.feed.bybit_ticker_poll_ms)
+    if "bitget" in exchanges.names:
+        feeds["bitget"] = BitgetMarket(market, settings.feed.bitget_ticker_poll_ms)
+    if "kucoin" in exchanges.names:
+        feeds["kucoin"] = KucoinMarket(market, settings.feed.kucoin_ticker_poll_ms)
+    if "hyperliquid" in exchanges.names:
+        feeds["hyperliquid"] = HyperliquidMarket(market, settings.feed.hyperliquid_poll_ms)
     if "variational" in exchanges.names:
         feeds["variational"] = VariationalMarket(
             market, lambda: exchanges.adapter("variational"), settings.exchanges.variational.poll_ms
@@ -187,7 +199,10 @@ async def _serve(
         on_catalog,
         sink=recorder,
         pinned=portfolio.pinned_pair_keys,
-        fresh_ms_overrides={"variational": settings.exchanges.variational.max_quote_age_ms},
+        # Hyperliquid's fast books arrive every ~0.5 s whether or not they changed, so a book up to 2 s old is live;
+        # its best prices are impact prices that need not equal the book top, so they cannot confirm a quiet book.
+        fresh_ms_overrides={"variational": settings.exchanges.variational.max_quote_age_ms, "hyperliquid": HYPERLIQUID_BOOK_FRESH_MS},
+        top_limit_ms_overrides={"variational": settings.exchanges.variational.max_quote_age_ms},
         funding=funding.rate,
     )
     feed_settings = FeedSettingsService(engine, database, journal)

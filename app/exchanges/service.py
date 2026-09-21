@@ -24,12 +24,16 @@ from app.exchanges.aster import adapter as aster
 from app.exchanges.base import ExchangeAdapter
 from app.exchanges.binance.adapter import BinanceAdapter
 from app.exchanges.bingx.adapter import BingxAdapter
+from app.exchanges.bitget.adapter import BitgetAdapter
+from app.exchanges.bybit.adapter import BybitAdapter
+from app.exchanges.hyperliquid import adapter as hyperliquid
+from app.exchanges.kucoin.adapter import KucoinAdapter
 from app.exchanges.ccxt_support import describe_error
 from app.exchanges.gate.adapter import GateAdapter
 from app.exchanges.mexc.adapter import MexcAdapter
 from app.exchanges.variational.adapter import VariationalAdapter
 from app.journal.journal import Journal, Level
-from app.keystore.keystore import Keystore, api_key_name, api_secret_name, mask
+from app.keystore.keystore import Keystore, api_key_name, api_passphrase_name, api_secret_name, mask
 from app.system.log_setup import SecretRedactor
 
 log = logging.getLogger(__name__)
@@ -37,7 +41,12 @@ log = logging.getLogger(__name__)
 FAILURES_BEFORE_DOWN = 2
 KEY_PATTERN = re.compile(r"^[\x21-\x7e]{8,256}$")
 
-AdapterFactory = Callable[[str, str | None, str | None, ExchangesSettings], ExchangeAdapter]
+PASSPHRASE_PATTERN = re.compile(r"^[\x20-\x7e]{1,128}$")
+PASSPHRASE_EXCHANGES = frozenset({"bitget", "kucoin"})
+# Exchanges signed by a wallet: the "key" is the main wallet address, the "secret" the private key of an API wallet made for it.
+WALLET_EXCHANGES = {"aster": aster.valid_keys, "hyperliquid": hyperliquid.valid_keys}
+
+AdapterFactory = Callable[..., ExchangeAdapter]
 
 
 class InvalidKeys(ValueError):
@@ -48,7 +57,9 @@ class UnknownExchange(KeyError):
     pass
 
 
-def default_adapter_factory(name: str, key: str | None, secret: str | None, settings: ExchangesSettings) -> ExchangeAdapter:
+def default_adapter_factory(
+    name: str, key: str | None, secret: str | None, settings: ExchangesSettings, passphrase: str | None = None
+) -> ExchangeAdapter:
     if name == "binance":
         return BinanceAdapter(key, secret, demo=settings.binance.demo, timeout_s=settings.request_timeout_s)
     if name == "mexc":
@@ -59,6 +70,14 @@ def default_adapter_factory(name: str, key: str | None, secret: str | None, sett
         return aster.AsterAdapter(key, secret, timeout_s=settings.request_timeout_s)
     if name == "bingx":
         return BingxAdapter(key, secret, timeout_s=settings.request_timeout_s)
+    if name == "bybit":
+        return BybitAdapter(key, secret, timeout_s=settings.request_timeout_s)
+    if name == "bitget":
+        return BitgetAdapter(key, secret, passphrase, timeout_s=settings.request_timeout_s)
+    if name == "kucoin":
+        return KucoinAdapter(key, secret, passphrase, timeout_s=settings.request_timeout_s)
+    if name == "hyperliquid":
+        return hyperliquid.HyperliquidAdapter(key, secret, timeout_s=settings.request_timeout_s)
     if name == "variational":
         return VariationalAdapter(timeout_s=settings.request_timeout_s, min_interval_ms=settings.variational.poll_ms)
     raise UnknownExchange(name)
@@ -113,12 +132,13 @@ class ExchangeService:
         self._clock = clock
         self._exchanges: dict[str, _Exchange] = {}
         for name in settings.enabled_names():
-            key, secret = (None, None) if name in READ_ONLY_EXCHANGES else self._read_keys(name)
+            key, secret, passphrase = (None, None, None) if name in READ_ONLY_EXCHANGES else self._read_keys(name)
+            complete = bool(key and secret and (passphrase or name not in PASSPHRASE_EXCHANGES))
             self._exchanges[name] = _Exchange(
                 name=name,
                 demo=name == "binance" and settings.binance.demo,
-                adapter=adapter_factory(name, key, secret, settings),
-                key_masked=mask(key) if key and secret else None,
+                adapter=adapter_factory(name, key, secret, settings, passphrase=passphrase),
+                key_masked=mask(key) if complete else None,
             )
 
     @property
@@ -135,9 +155,10 @@ class ExchangeService:
         """Demo keys live apart from live keys, so switching modes never mixes them up."""
         return f"{name}-demo" if name == "binance" and self._settings.binance.demo else name
 
-    def _read_keys(self, name: str) -> tuple[str | None, str | None]:
+    def _read_keys(self, name: str) -> tuple[str | None, str | None, str | None]:
         slot = self._slot(name)
-        return self._keystore.get(api_key_name(slot)), self._keystore.get(api_secret_name(slot))
+        passphrase = self._keystore.get(api_passphrase_name(slot)) if name in PASSPHRASE_EXCHANGES else None
+        return self._keystore.get(api_key_name(slot)), self._keystore.get(api_secret_name(slot)), passphrase
 
     def _get(self, name: str) -> _Exchange:
         exchange = self._exchanges.get(name)
@@ -157,21 +178,28 @@ class ExchangeService:
         """The current client of an exchange; it changes when keys are replaced, so do not keep it."""
         return self._get(name).adapter
 
-    async def save_keys(self, name: str, api_key: str, api_secret: str) -> dict[str, Any]:
+    async def save_keys(self, name: str, api_key: str, api_secret: str, api_passphrase: str | None = None) -> dict[str, Any]:
         exchange = self._get(name)
         if self.read_only(name):
             raise InvalidKeys(f"{name} has no trading API, keys are not used")
         api_key, api_secret = api_key.strip(), api_secret.strip()
-        if name == "aster":
-            # Aster signs with a wallet: the main wallet address and the private key of an API wallet made for it.
-            if not aster.valid_keys(api_key, api_secret):
-                raise InvalidKeys("Aster: the key is the main wallet address (0x + 40 hex), the secret is the API wallet private key (64 hex)")
+        wallet_check = WALLET_EXCHANGES.get(name)
+        if wallet_check is not None:
+            if not wallet_check(api_key, api_secret):
+                raise InvalidKeys(f"{name}: the key is the main wallet address (0x + 40 hex), the secret is the API wallet private key (64 hex)")
         elif not KEY_PATTERN.match(api_key) or not KEY_PATTERN.match(api_secret):
             raise InvalidKeys("key and secret must be 8–256 visible ASCII characters without spaces")
+        if name in PASSPHRASE_EXCHANGES:
+            if api_passphrase is None or not PASSPHRASE_PATTERN.match(api_passphrase):
+                raise InvalidKeys(f"{name}: the passphrase set when the key was made is required (1–128 characters)")
+        else:
+            api_passphrase = None
         slot = self._slot(name)
         self._keystore.set(api_key_name(slot), api_key)
         self._keystore.set(api_secret_name(slot), api_secret)
-        await self._replace_adapter(exchange, api_key, api_secret)
+        if api_passphrase is not None:
+            self._keystore.set(api_passphrase_name(slot), api_passphrase)
+        await self._replace_adapter(exchange, api_key, api_secret, api_passphrase)
         exchange.key_masked = mask(api_key)
         exchange.check = None
         self._journal.emit(Level.INFO, "exchange", "keys_saved", exchange=name, key=exchange.key_masked)
@@ -182,15 +210,16 @@ class ExchangeService:
         slot = self._slot(name)
         self._keystore.delete(api_key_name(slot))
         self._keystore.delete(api_secret_name(slot))
-        await self._replace_adapter(exchange, None, None)
+        self._keystore.delete(api_passphrase_name(slot))
+        await self._replace_adapter(exchange, None, None, None)
         exchange.key_masked = None
         exchange.check = None
         self._journal.emit(Level.INFO, "exchange", "keys_deleted", exchange=name)
         return self.describe_one(name)
 
-    async def _replace_adapter(self, exchange: _Exchange, key: str | None, secret: str | None) -> None:
+    async def _replace_adapter(self, exchange: _Exchange, key: str | None, secret: str | None, passphrase: str | None) -> None:
         old = exchange.adapter
-        exchange.adapter = self._factory(exchange.name, key, secret, self._settings)
+        exchange.adapter = self._factory(exchange.name, key, secret, self._settings, passphrase=passphrase)
         exchange.generation += 1
         try:
             # A request still running on the old client fails once; the link needs two failures to go down.
@@ -338,6 +367,7 @@ class ExchangeService:
             "keys": self._keys_state(exchange),
             "check": exchange.check,
             "read_only": self.read_only(exchange.name),
+            "needs_passphrase": exchange.name in PASSPHRASE_EXCHANGES,
         }
 
     def describe(self) -> list[dict[str, Any]]:

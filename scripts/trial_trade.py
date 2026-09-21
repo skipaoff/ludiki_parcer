@@ -12,6 +12,7 @@ Usage (from the repository folder):
     .venv\\Scripts\\python.exe scripts\\trial_trade.py gate --i-understand
     .venv\\Scripts\\python.exe scripts\\trial_trade.py aster --i-understand
     .venv\\Scripts\\python.exe scripts\\trial_trade.py bingx --i-understand
+    .venv\\Scripts\\python.exe scripts\\trial_trade.py bybit --i-understand   (also bitget, kucoin, hyperliquid)
 Results go to ../ludik-data/trials/<exchange>-<time>.json; copy the findings to docs/EXCHANGES.md as [проверено].
 """
 
@@ -31,12 +32,15 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from app.config.settings import BinanceSettings, ExchangesSettings, load_settings  # noqa: E402
 from app.core.schemas import LegSide  # noqa: E402
 from app.exchanges.service import default_adapter_factory  # noqa: E402
-from app.keystore.keystore import Keystore, api_key_name, api_secret_name  # noqa: E402
+from app.keystore.keystore import Keystore, api_key_name, api_passphrase_name, api_secret_name  # noqa: E402
 from app.system.event_loop import loop_factory  # noqa: E402
 from app.system.log_setup import SecretRedactor  # noqa: E402
 from app.system.tls import use_system_trust_store  # noqa: E402
 
-DEFAULT_SYMBOLS = {"binance": "DOGEUSDT", "mexc": "DOGE_USDT", "gate": "DOGE_USDT", "aster": "DOGEUSDT", "bingx": "DOGE-USDT"}
+DEFAULT_SYMBOLS = {
+    "binance": "DOGEUSDT", "mexc": "DOGE_USDT", "gate": "DOGE_USDT", "aster": "DOGEUSDT", "bingx": "DOGE-USDT",
+    "bybit": "DOGEUSDT", "bitget": "DOGEUSDT", "kucoin": "DOGEUSDTM", "hyperliquid": "DOGE",
+}
 
 
 def plain(value):
@@ -59,7 +63,7 @@ async def trial(exchange: str, symbol: str, demo: bool) -> dict:
     key, secret = keystore.get(api_key_name(slot)), keystore.get(api_secret_name(slot))
     if not key or not secret:
         raise SystemExit(f"no keys for {slot}: add them in Settings → Exchanges first")
-    adapter = default_adapter_factory(exchange, key, secret, settings)
+    adapter = default_adapter_factory(exchange, key, secret, settings, passphrase=keystore.get(api_passphrase_name(slot)))
     report: dict = {"exchange": exchange, "symbol": symbol, "demo": demo, "started_ms": int(time.time() * 1000), "steps": []}
     try:
         facts = await adapter.check_account()
@@ -103,7 +107,7 @@ async def trial(exchange: str, symbol: str, demo: bool) -> dict:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Open and close the minimum position once, to see what the exchange really answers.")
-    parser.add_argument("exchange", choices=["binance", "mexc", "gate", "aster", "bingx"])
+    parser.add_argument("exchange", choices=sorted(DEFAULT_SYMBOLS))
     parser.add_argument("--symbol")
     parser.add_argument("--demo", action="store_true", help="Binance demo trading with demo keys")
     parser.add_argument("--i-understand", action="store_true", help="real orders are sent (on a live account, real money)")

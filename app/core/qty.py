@@ -77,11 +77,12 @@ def plan_quantity(
     price_per_token: Decimal,
     long: Instrument,
     short: Instrument,
+    step: Decimal | None = None,
 ) -> QtyPlan | QtyRejected:
-    """Convert the configured dollar size into one token quantity valid on both legs."""
+    """Convert the configured dollar size into one token quantity valid on both legs; step — their common step, if known."""
     if size_usd <= 0 or price_per_token <= 0:
         return QtyRejected("non_positive_input")
-    step = common_step_tokens(long, short)
+    step = common_step_tokens(long, short) if step is None else step
     qty = floor_to_step(size_usd / price_per_token, step)
     if qty <= 0:
         return QtyRejected("size_below_common_step")

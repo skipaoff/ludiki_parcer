@@ -40,6 +40,10 @@ URLS = {
     "gate_tickers": "https://api.gateio.ws/api/v4/futures/usdt/tickers",
     "gate_contracts": "https://api.gateio.ws/api/v4/futures/usdt/contracts",
     "bingx": "https://open-api.bingx.com/openApi/swap/v2/quote/premiumIndex",
+    "bybit": "https://api.bybit.com/v5/market/tickers?category=linear",
+    "bitget": "https://api.bitget.com/api/v2/mix/market/current-fund-rate?productType=USDT-FUTURES",
+    "kucoin": "https://api-futures.kucoin.com/api/v1/contracts/active",
+    "hyperliquid": "https://api.hyperliquid.xyz/info",
 }
 
 Rates = dict[str, FundingRate]
@@ -117,6 +121,52 @@ def parse_bingx(payload: dict[str, Any]) -> Rates:
     return _collect(
         (item.get("symbol", ""), _rate(item.get("lastFundingRate"), item.get("fundingIntervalHours", 8), item.get("nextFundingTime")))
         for item in payload.get("data") or []
+    )
+
+
+def parse_bybit(payload: dict[str, Any]) -> Rates:
+    """GET /v5/market/tickers?category=linear: fundingRate, fundingIntervalHour, nextFundingTime."""
+    if payload.get("retCode") not in (0, "0"):
+        raise RuntimeError(f"bybit tickers answer {payload.get('retCode')}")
+    return _collect(
+        (item.get("symbol", ""), _rate(item.get("fundingRate"), item.get("fundingIntervalHour") or 8, item.get("nextFundingTime")))
+        for item in (payload.get("result") or {}).get("list") or []
+    )
+
+
+def parse_bitget(payload: dict[str, Any]) -> Rates:
+    """GET /api/v2/mix/market/current-fund-rate?productType=USDT-FUTURES: fundingRate, fundingRateInterval (hours), nextUpdate."""
+    if str(payload.get("code")) != "00000":
+        raise RuntimeError(f"bitget funding answer {payload.get('code')}")
+    return _collect(
+        (item.get("symbol", ""), _rate(item.get("fundingRate"), item.get("fundingRateInterval") or 8, item.get("nextUpdate")))
+        for item in payload.get("data") or []
+    )
+
+
+def parse_kucoin(payload: dict[str, Any]) -> Rates:
+    """GET /api/v1/contracts/active: fundingFeeRate, currentFundingRateGranularity (ms), nextFundingRateDateTime."""
+    if str(payload.get("code")) != "200000":
+        raise RuntimeError(f"kucoin contracts answer {payload.get('code')}")
+    rates = []
+    for item in payload.get("data") or []:
+        granularity = _decimal(item.get("currentFundingRateGranularity") or item.get("fundingRateGranularity"))
+        hours = granularity / 3_600_000 if granularity else None
+        rates.append((item.get("symbol", ""), _rate(item.get("fundingFeeRate"), hours, item.get("nextFundingRateDateTime"))))
+    return _collect(rates)
+
+
+def parse_hyperliquid(answer: list[Any], now_ms: int) -> Rates:
+    """
+    POST /info {"type": "metaAndAssetCtxs"}: funding is the hourly rate of each coin; settlements fall on every whole hour
+    (UTC), so the next one is the coming hour.
+    """
+    meta, contexts = answer[0], answer[1]
+    next_hour = (now_ms // 3_600_000 + 1) * 3_600_000
+    return _collect(
+        (coin.get("name", ""), _rate(context.get("funding"), 1, next_hour))
+        for coin, context in zip(meta.get("universe") or [], contexts)
+        if not coin.get("isDelisted")
     )
 
 
@@ -228,10 +278,33 @@ async def _bingx(service: FundingService, session: aiohttp.ClientSession) -> Rat
     return parse_bingx(await _get(session, URLS["bingx"]))
 
 
+async def _bybit(service: FundingService, session: aiohttp.ClientSession) -> Rates:
+    return parse_bybit(await _get(session, URLS["bybit"]))
+
+
+async def _bitget(service: FundingService, session: aiohttp.ClientSession) -> Rates:
+    return parse_bitget(await _get(session, URLS["bitget"]))
+
+
+async def _kucoin(service: FundingService, session: aiohttp.ClientSession) -> Rates:
+    return parse_kucoin(await _get(session, URLS["kucoin"]))
+
+
+async def _hyperliquid(service: FundingService, session: aiohttp.ClientSession) -> Rates:
+    async with session.post(URLS["hyperliquid"], json={"type": "metaAndAssetCtxs"}) as response:
+        response.raise_for_status()
+        answer = orjson.loads(await response.read())
+    return parse_hyperliquid(answer, int(service._clock() * 1000))
+
+
 FETCHERS: dict[str, Callable[[FundingService, aiohttp.ClientSession], Awaitable[Rates]]] = {
     "binance": lambda service, session: service._binance_like("binance", session),
     "aster": lambda service, session: service._binance_like("aster", session),
     "mexc": _mexc,
     "gate": lambda service, session: service._gate(session),
     "bingx": _bingx,
+    "bybit": _bybit,
+    "bitget": _bitget,
+    "kucoin": _kucoin,
+    "hyperliquid": _hyperliquid,
 }

@@ -35,6 +35,20 @@ def test_pair_funding_long_pays_positive_rate_short_receives_it():
     assert (funding.next_ms, funding.next_pct) == (NOW + 10 * 60_000, Decimal("-0.01"))
 
 
+def test_pair_funding_says_when_it_changes_and_is_the_same_until_then():
+    long = rate("0.01", 8, 5 * HOUR)  # settles at 5 h and 13 h
+    short = rate("0.03", 4, 3 * HOUR)  # settles at 3 h, 7 h, 11 h
+    horizon = Decimal(6)
+    funding = pair_funding(long, short, NOW, horizon)
+    # Nothing settles before 3 h, but the short's 7 h settlement enters the 6 h window at 1 h.
+    assert funding.changes_ms == NOW + HOUR
+    view = lambda value: (value.hourly_pct, value.horizon_pct, value.next_ms, value.next_pct)  # noqa: E731
+    for moment in range(NOW, NOW + HOUR, 5 * 60_000):
+        assert view(pair_funding(long, short, moment, horizon)) == view(funding)
+    assert pair_funding(long, short, NOW + HOUR, horizon).horizon_pct == Decimal("-0.01") + Decimal("0.06")
+    assert pair_funding(rate("0.01", 8, None), rate("0.02", 1, None), NOW, horizon).changes_ms is None
+
+
 def test_settlements_at_the_same_moment_add_up_and_unknown_legs_make_it_unknown():
     long, short = rate("-0.02", 8, HOUR), rate("0.05", 8, HOUR)
     funding = pair_funding(long, short, NOW, Decimal(1))

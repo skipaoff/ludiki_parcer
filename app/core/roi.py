@@ -10,12 +10,13 @@ Formulas are specified in docs/PLAN.md, section 7.
 
 from __future__ import annotations
 
+from bisect import bisect_left
 from dataclasses import dataclass
 from decimal import Decimal
 from typing import Sequence
 
 from app.core.schemas import Book, Fees, Level
-from app.core.vwap import depth_tokens, walk
+from app.core.vwap import walk
 
 
 @dataclass(frozen=True, slots=True)
@@ -93,27 +94,42 @@ def capacity_tokens(
     """
     Largest multiple of step_tokens whose book-based net ROI is still at or above the threshold.
 
-    Net ROI only worsens as size grows, so a binary search over step multiples is exact.
+    Net ROI only worsens as size grows, so a binary search over step multiples is exact. Each probe prices both sides
+    from running totals of the levels instead of walking them again (a deep book took a millisecond per pair).
     Returns 0 when even one step does not pass.
     """
-    visible = min(depth_tokens(long_asks), depth_tokens(short_bids))
-    high = int(visible / step_tokens)
+    buy_side, sell_side = _Totals(long_asks), _Totals(short_bids)
+    high = int(min(buy_side.qty[-1], sell_side.qty[-1]) / step_tokens)
     low = 0
+    round_trip = fees.round_trip_pct
     while low < high:
         middle = (low + high + 1) // 2
         qty = step_tokens * middle
-        buy = walk(long_asks, qty)
-        sell = walk(short_bids, qty)
-        passes = (
-            buy is not None
-            and sell is not None
-            and gross_pct(buy.avg_price, sell.avg_price) - fees.round_trip_pct >= min_roi_net_pct
-        )
-        if passes:
+        if gross_pct(buy_side.avg_price(qty), sell_side.avg_price(qty)) - round_trip >= min_roi_net_pct:
             low = middle
         else:
             high = middle - 1
     return step_tokens * low
+
+
+class _Totals:
+    """Running quantity and cost of one book side, best level first."""
+
+    def __init__(self, levels: Sequence[Level]) -> None:
+        self.levels = levels
+        self.qty = [Decimal(0)]
+        self.cost = [Decimal(0)]
+        for level in levels:
+            self.qty.append(self.qty[-1] + level.qty_tokens)
+            self.cost.append(self.cost[-1] + level.qty_tokens * level.price)
+
+    def avg_price(self, qty_tokens: Decimal) -> Decimal:
+        """Average fill price of a quantity within the visible depth, the same as walk() gives."""
+        index = bisect_left(self.qty, qty_tokens)
+        if self.qty[index] == qty_tokens:
+            return self.cost[index] / qty_tokens
+        cost = self.cost[index - 1] + (qty_tokens - self.qty[index - 1]) * self.levels[index - 1].price
+        return cost / qty_tokens
 
 
 def exit_quote(long_book: Book, short_book: Book, qty_tokens: Decimal) -> ExitQuote | None:

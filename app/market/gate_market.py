@@ -25,6 +25,7 @@ log = logging.getLogger(__name__)
 
 WS_URL = "wss://fx-ws.gateio.ws/v4/ws/usdt"
 TICKERS_URL = "https://api.gateio.ws/api/v4/futures/usdt/tickers"
+TICKERS_TIMEOUT_S = 20
 SYMBOLS_PER_CONNECTION = 30
 DEPTH_LEVELS = "20"
 EXCHANGE = "gate"
@@ -141,17 +142,18 @@ class GateMarket:
                 task.cancel()
 
     async def _poll_tickers(self) -> None:
-        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=5)) as session:
+        # The list is 0.5 MB and can take several seconds to arrive; its prices are dated from the request, not the arrival.
+        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=TICKERS_TIMEOUT_S)) as session:
             while True:
                 started = time.monotonic()
                 try:
+                    now = int(time.time() * 1000)
                     async with session.get(TICKERS_URL) as response:
                         response.raise_for_status()
                         tickers = orjson.loads(await response.read())
-                    now = int(time.time() * 1000)
                     for contract, bid, ask, mark, index, volume in ticker_rows(tickers):
                         if bid > 0 and ask > 0:
-                            self._state.set_top(EXCHANGE, contract, bid, ask, now)
+                            self._state.set_top(EXCHANGE, contract, bid, ask, now, received_ms=now)
                         self._state.set_mark(EXCHANGE, contract, mark, index, volume)
                     self._state.count(EXCHANGE)
                     self.polls += 1

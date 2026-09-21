@@ -38,6 +38,29 @@ const KEY_FIELDS: Record<string, { key: string; secret: string; hint: string }> 
     secret: "Secret",
     hint: "Права ключа BingX: чтение и торговля бессрочными фьючерсами. Вывод и переводы не включайте.",
   },
+  hyperliquid: {
+    key: "Кошелёк",
+    secret: "Ключ API-кошелька",
+    hint:
+      "Hyperliquid подписывает ордера кошельком. «Кошелёк» — адрес основного кошелька (0x…). «Ключ API-кошелька» — " +
+      "приватный ключ API-кошелька, созданного на app.hyperliquid.xyz/API. API-кошелёк не может выводить средства. " +
+      "Никогда не вводите приватный ключ основного кошелька — терминал такой ключ не примет. Цены Hyperliquid в USDC.",
+  },
+  bitget: {
+    key: "API key",
+    secret: "Secret",
+    hint: "Bitget: права чтения и торговли фьючерсами, без вывода; passphrase — та, что задана при создании ключа.",
+  },
+  kucoin: {
+    key: "API key",
+    secret: "Secret",
+    hint: "KuCoin: права General и Futures, без Withdrawal; passphrase — та, что задана при создании ключа.",
+  },
+  bybit: {
+    key: "API key",
+    secret: "Secret",
+    hint: "Bybit: единый торговый аккаунт, права Contract / Derivatives Trade, без Withdraw. Режим маржи терминал не меняет — это настройка аккаунта.",
+  },
 };
 
 export function exchangeTitle(exchange: { name: string; demo: boolean }): string {
@@ -102,6 +125,7 @@ function ExchangeCard({
   const [editing, setEditing] = useState(exchange.key_masked === null);
   const [apiKey, setApiKey] = useState("");
   const [apiSecret, setApiSecret] = useState("");
+  const [apiPassphrase, setApiPassphrase] = useState("");
   const [busy, setBusy] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const link = live ?? exchange;
@@ -128,11 +152,13 @@ function ExchangeCard({
   const save = async () => {
     const key = apiKey;
     const secret = apiSecret;
+    const passphrase = apiPassphrase;
     setApiKey("");
     setApiSecret("");
-    const saved = await run("сохранение", () =>
-      apiSend<ExchangeDetails>("PUT", `/api/exchanges/${exchange.name}/keys`, token, { api_key: key, api_secret: secret }),
-    );
+    setApiPassphrase("");
+    const body: Record<string, string> = { api_key: key, api_secret: secret };
+    if (exchange.needs_passphrase) body.api_passphrase = passphrase;
+    const saved = await run("сохранение", () => apiSend<ExchangeDetails>("PUT", `/api/exchanges/${exchange.name}/keys`, token, body));
     if (saved) {
       setEditing(false);
       await run("проверка", () => apiSend<ExchangeDetails>("POST", `/api/exchanges/${exchange.name}/check`, token));
@@ -207,8 +233,23 @@ function ExchangeCard({
               spellCheck={false}
             />
           </label>
+          {exchange.needs_passphrase && (
+            <label>
+              <span>Passphrase</span>
+              <input
+                type="password"
+                value={apiPassphrase}
+                onChange={(event) => setApiPassphrase(event.target.value)}
+                spellCheck={false}
+              />
+            </label>
+          )}
           <div className="actions">
-            <button className="action" type="submit" disabled={busy !== null || !apiKey || !apiSecret}>
+            <button
+              className="action"
+              type="submit"
+              disabled={busy !== null || !apiKey || !apiSecret || (exchange.needs_passphrase === true && !apiPassphrase)}
+            >
               [СОХРАНИТЬ И ПРОВЕРИТЬ]
             </button>
             {exchange.key_masked && (

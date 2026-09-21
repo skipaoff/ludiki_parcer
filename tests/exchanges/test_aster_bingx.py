@@ -17,7 +17,7 @@ from app.exchanges.aster import adapter as aster
 from app.exchanges.binance import adapter as binance
 from app.exchanges.bingx import adapter as bingx
 from app.market import bingx_market
-from app.market.binance_streams import ASTER_RADAR_POLL_S, aster_streams, handle_frame
+from app.market.binance_streams import RADAR_POLL_S, aster_streams, handle_frame
 from app.market.state import MarketState
 
 FIXTURES = Path(__file__).parent / "fixtures"
@@ -138,7 +138,7 @@ def test_aster_radar_is_polled_not_streamed():
     streams = aster_streams(state)
     streams.set_radar(["BTCUSDT", "ETHUSDT"])
     # Aster's book tickers ran at 6,600 messages a second: no radar sockets, a REST poll once a second instead.
-    assert streams._radar == [] and streams._radar_poll_s == ASTER_RADAR_POLL_S == 1.0
+    assert streams._radar == [] and streams._radar_poll_s == RADAR_POLL_S == 1.0
     assert streams.stats()["radar_streams"] == 0
 
 

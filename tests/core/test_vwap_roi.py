@@ -76,6 +76,28 @@ def test_capacity_is_zero_when_one_step_fails():
     assert capacity_tokens(levels(("1.00", "100")), levels(("1.001", "100")), fees(), D("0.5"), D("1")) == 0
 
 
+def test_capacity_matches_walking_the_book_at_every_probe():
+    import random
+
+    random.seed(7)
+    for _ in range(200):
+        ask_prices = sorted(1 + random.random() / 20 for _ in range(12))
+        bid_prices = sorted((1.03 - random.random() / 20 for _ in range(12)), reverse=True)
+        asks = levels(*((f"{price:.5f}", str(random.choice([0, 1, 3, 25, 400]))) for price in ask_prices))
+        bids = levels(*((f"{price:.5f}", str(random.choice([0, 2, 7, 90]))) for price in bid_prices))
+        step = D(random.choice(["1", "0.5", "3"]))
+        threshold = D(random.choice(["0", "0.5", "1", "1.5"]))
+
+        visible = min(sum((level.qty_tokens for level in asks), D(0)), sum((level.qty_tokens for level in bids), D(0)))
+        expected = D(0)
+        for multiple in range(1, int(visible / step) + 1):
+            buy, sell = walk(asks, step * multiple), walk(bids, step * multiple)
+            if (sell.avg_price - buy.avg_price) / buy.avg_price * 100 - fees().round_trip_pct < threshold:
+                break
+            expected = step * multiple
+        assert capacity_tokens(asks, bids, fees(), threshold, step) == expected
+
+
 def test_exit_spread_and_pnl_now():
     long_book = book("mexc", bids=levels(("1.0100", "1000")))
     short_book = book("binance", asks=levels(("1.0120", "1000")))

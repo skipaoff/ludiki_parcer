@@ -27,6 +27,11 @@ def api_secret_name(exchange: str) -> str:
     return f"{exchange}:api_secret"
 
 
+def api_passphrase_name(exchange: str) -> str:
+    """Bitget and KuCoin keys come with a passphrase chosen when the key was made."""
+    return f"{exchange}:api_passphrase"
+
+
 class CredentialBackend(Protocol):
     def get_password(self, service: str, username: str) -> str | None: ...
 

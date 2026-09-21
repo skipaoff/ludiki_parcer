@@ -39,3 +39,26 @@ async def test_three_exchanges_make_three_pairs_and_a_failing_one_keeps_its_last
     assert "gate" in summary["error"]
     assert [event.type for event in events] == ["refreshed", "refresh_failed", "refreshed"]
     assert events[0].payload["contracts"] == {"binance": 1, "mexc": 1, "gate": 1}
+
+
+async def test_an_exchange_that_never_loaded_is_retried_alone():
+    adapters = {"binance": Adapter("binance", "SOLUSDT"), "mexc": Adapter("mexc", "SOL_USDT"), "gate": Adapter("gate", "SOL_USDT")}
+    adapters["gate"].fail = True
+    service = InstrumentService(["binance", "mexc", "gate"], adapters.__getitem__, SimpleNamespace(ready=False), Journal(), InstrumentsSettings())
+
+    await service.refresh()
+    assert service.missing() == ["gate"] and service.version == 1
+
+    loads = []
+    for name, adapter in adapters.items():
+        original = adapter.load_instruments
+        adapter.load_instruments = lambda original=original, name=name: loads.append(name) or original()
+    summary = await service.refresh(only=service.missing())
+    assert loads == ["gate"]
+    assert service.version == 1 and "gate" in summary["error"]  # still down: the catalog is not rebuilt
+
+    adapters["gate"].fail = False
+    summary = await service.refresh(only=service.missing())
+    assert loads == ["gate", "gate"]
+    assert service.missing() == [] and service.version == 2
+    assert summary["pairs"] == 3 and summary["error"] is None

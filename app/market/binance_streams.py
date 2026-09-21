@@ -4,8 +4,11 @@ Changes when: Binance or Aster stream routes, payloads or per-connection limits 
 Anti-goal:
 1. Binance's all-symbols !bookTicker stream — it updates only every 5 seconds there.
 2. More than 200 streams on one connection — both exchanges refuse them.
-3. Streaming Aster's best prices — its book tickers ran at 6,600 messages a second (15.09.2026), a third of a CPU core and
-   stalls of the event loop of up to 300 ms; Aster's radar polls the all-symbols REST book ticker once a second instead.
+3. Streaming best prices per symbol — Aster's book tickers ran at 6,600 messages a second (15.09.2026), a third of a CPU
+   core and stalls of the event loop of up to 300 ms. Binance's arrived here 2 s late on the median and up to 4 s even for
+   ten symbols (depth20@100ms on the same route: on time), and a socket with 200 of them was dropped every ~20 s without a
+   close frame (15.09.2026). Both radars poll the all-symbols REST book ticker once a second instead (Binance: 22 KB
+   gzipped, ~0.3 s, weight 5 of 2,400 a minute).
 
 Payloads checked live: Binance on 13.09.2026, Aster on 14.09.2026 (docs/EXCHANGES.md).
 """
@@ -28,7 +31,7 @@ log = logging.getLogger(__name__)
 PUBLIC_URL = "wss://fstream.binance.com/public/stream"
 MARKET_URL = "wss://fstream.binance.com/market/stream"
 MARK_PRICE_STREAM = "!markPrice@arr@1s"
-ASTER_RADAR_POLL_S = 1.0
+RADAR_POLL_S = 1.0
 BOOK_TICKER_URL = "https://fapi.binance.com/fapi/v1/ticker/bookTicker"
 ASTER_URL = "wss://fstream.asterdex.com/stream"
 ASTER_BOOK_TICKER_URL = "https://fapi.asterdex.com/fapi/v1/ticker/bookTicker"
@@ -194,6 +197,11 @@ class BinanceStreams:
         }
 
 
+def binance_streams(state: MarketState) -> BinanceStreams:
+    """Binance: books and marks streamed, radar prices polled from REST once a second (see anti-goal 3)."""
+    return BinanceStreams(state, radar_poll_s=RADAR_POLL_S)
+
+
 def aster_streams(state: MarketState) -> BinanceStreams:
     """Aster: one host for every stream; radar prices polled from REST once a second (see anti-goal 3)."""
     return BinanceStreams(
@@ -202,5 +210,5 @@ def aster_streams(state: MarketState) -> BinanceStreams:
         public_url=ASTER_URL,
         market_url=ASTER_URL,
         book_ticker_url=ASTER_BOOK_TICKER_URL,
-        radar_poll_s=ASTER_RADAR_POLL_S,
+        radar_poll_s=RADAR_POLL_S,
     )

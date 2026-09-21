@@ -1,0 +1,70 @@
+{
+ "code": "200000",
+ "data": [
+  {
+   "sequence": 1705630492136,
+   "symbol": "ETHUSDCM",
+   "side": "buy",
+   "size": 57,
+   "tradeId": "1705879170498",
+   "price": "2411.21",
+   "bestBidPrice": "2411.74",
+   "bestBidSize": 9,
+   "bestAskPrice": "2412.59",
+   "bestAskSize": 9,
+   "ts": 1789485150607000000
+  },
+  {
+   "sequence": 1747614660535,
+   "symbol": "XBTUSDTM",
+   "side": "sell",
+   "size": 1,
+   "tradeId": "1943596241225",
+   "price": "76029.4",
+   "bestBidPrice": "76032.4",
+   "bestBidSize": 498,
+   "bestAskPrice": "76032.5",
+   "bestAskSize": 92,
+   "ts": 1789485204736000000
+  },
+  {
+   "sequence": 1698457139152,
+   "symbol": "ETHUSDM",
+   "side": "buy",
+   "size": 1633,
+   "tradeId": "1698776159116",
+   "price": "2408.46",
+   "bestBidPrice": "2407.83",
+   "bestBidSize": 26,
+   "bestAskPrice": "2409.95",
+   "bestAskSize": 26,
+   "ts": 1789484652617000000
+  },
+  {
+   "sequence": 1710626173586,
+   "symbol": "DOGEUSDTM",
+   "side": "sell",
+   "size": 37,
+   "tradeId": "1712838418185",
+   "price": "0.08161",
+   "bestBidPrice": "0.0816",
+   "bestBidSize": 60,
+   "bestAskPrice": "0.08162",
+   "bestAskSize": 84,
+   "ts": 1789485206278000000
+  },
+  {
+   "sequence": 1725794123995,
+   "symbol": "10000CATUSDTM",
+   "side": "buy",
+   "size": 30,
+   "tradeId": "1725799675700",
+   "price": "0.01987",
+   "bestBidPrice": "0.01987",
+   "bestBidSize": 121,
+   "bestAskPrice": "0.0199",
+   "bestAskSize": 256,
+   "ts": 1789485089770000000
+  }
+ ]
+}

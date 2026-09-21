@@ -129,12 +129,13 @@ def create_app(server: ServerSettings, web_dist: Path, context: ApiContext) -> F
         try:
             body = orjson.loads(await request.body())
             api_key, api_secret = body["api_key"], body["api_secret"]
-            if not isinstance(api_key, str) or not isinstance(api_secret, str):
+            api_passphrase = body.get("api_passphrase")
+            if not isinstance(api_key, str) or not isinstance(api_secret, str) or not (api_passphrase is None or isinstance(api_passphrase, str)):
                 raise TypeError
-        except (orjson.JSONDecodeError, KeyError, TypeError):
-            raise HTTPException(status_code=400, detail="expected JSON with api_key and api_secret strings") from None
+        except (orjson.JSONDecodeError, KeyError, TypeError, AttributeError):
+            raise HTTPException(status_code=400, detail="expected JSON with api_key and api_secret strings (and api_passphrase where needed)") from None
         with exchange_errors():
-            return await exchanges().save_keys(name, api_key, api_secret)
+            return await exchanges().save_keys(name, api_key, api_secret, api_passphrase)
 
     @app.delete("/api/exchanges/{name}/keys", dependencies=[Depends(require_token)])
     async def delete_keys(name: str) -> dict[str, Any]:

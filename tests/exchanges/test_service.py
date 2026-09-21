@@ -62,8 +62,9 @@ class Harness:
         self.adapters: list[FakeAdapter] = []
         self.settings = settings or ExchangesSettings(probe_interval_s=10, request_timeout_s=1)
 
-    def factory(self, name, key, secret, settings):
+    def factory(self, name, key, secret, settings, passphrase=None):
         adapter = FakeAdapter(name, key, secret)
+        adapter.passphrase = passphrase
         self.adapters.append(adapter)
         return adapter
 
@@ -103,7 +104,7 @@ async def test_invalid_keys_are_refused_without_touching_the_keystore():
     with pytest.raises(InvalidKeys):
         await service.save_keys("mexc", "short", "with space inside")
     with pytest.raises(UnknownExchange):
-        await service.save_keys("bybit", "long-enough-key", "long-enough-secret")
+        await service.save_keys("okx", "long-enough-key", "long-enough-secret")
     assert harness.backend.values == {}
 
 
@@ -216,3 +217,22 @@ async def test_link_goes_down_only_after_two_failed_probes_and_recovers():
     await service.probe("binance")
     assert service.snapshot()[0]["link"] == "up"
     assert [kind for exchange, kind in harness.types() if exchange == "binance"] == ["link_up", "link_down", "link_up"]
+
+
+async def test_bitget_and_kucoin_keys_need_a_passphrase_and_hyperliquid_a_wallet():
+    harness = Harness()
+    service = harness.build()
+    with pytest.raises(InvalidKeys):
+        await service.save_keys("bitget", "bitget-key-123456", "bitget-secret-123456")
+    with pytest.raises(InvalidKeys):
+        await service.save_keys("hyperliquid", "hl-api-key-123456", "hl-secret-123456")
+    assert harness.backend.values == {}
+
+    described = await service.save_keys("kucoin", "kucoin-key-123456", "kucoin-secret-123456", "my pass phrase")
+
+    assert harness.backend.values[("ludik", "kucoin:api_passphrase")] == "my pass phrase"
+    assert harness.adapters[-1].passphrase == "my pass phrase" and described["needs_passphrase"] is True
+    await service.delete_keys("kucoin")
+    assert ("ludik", "kucoin:api_passphrase") not in harness.backend.values
+    await service.save_keys("hyperliquid", "0x" + "ab" * 20, "11" * 32)
+    assert harness.adapters[-1].name == "hyperliquid" and harness.adapters[-1].passphrase is None

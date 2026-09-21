@@ -1,0 +1,39 @@
+{
+ "code": "00000",
+ "msg": "success",
+ "requestTime": 1789485208551,
+ "data": [
+  {
+   "symbol": "BTCUSDT",
+   "fundingRate": "0.000085",
+   "fundingRateInterval": "8",
+   "nextUpdate": "1789488000000",
+   "minFundingRate": "-0.003",
+   "maxFundingRate": "0.003"
+  },
+  {
+   "symbol": "DOGEUSDT",
+   "fundingRate": "0.000057",
+   "fundingRateInterval": "8",
+   "nextUpdate": "1789488000000",
+   "minFundingRate": "-0.00495",
+   "maxFundingRate": "0.00495"
+  },
+  {
+   "symbol": "1000BONKUSDT",
+   "fundingRate": "0.00005",
+   "fundingRateInterval": "4",
+   "nextUpdate": "1789488000000",
+   "minFundingRate": "-0.0132",
+   "maxFundingRate": "0.0132"
+  },
+  {
+   "symbol": "1MBABYDOGEUSDT",
+   "fundingRate": "0.00005",
+   "fundingRateInterval": "4",
+   "nextUpdate": "1789488000000",
+   "minFundingRate": "-0.0132",
+   "maxFundingRate": "0.0132"
+  }
+ ]
+}

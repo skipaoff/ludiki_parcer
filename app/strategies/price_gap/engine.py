@@ -21,13 +21,13 @@ from typing import Any, Callable, Mapping, Protocol
 
 from app.config.settings import FeedSettings
 from app.core.episodes import EpisodeRules, EpisodeState, EventKind, Phase, Sample, end, step
-from app.core.funding import FundingRate, pair_funding
+from app.core.funding import FundingRate, PairFunding, pair_funding
 from app.core.interest import interest
 from app.core.links import trade_url
 from app.core.qty import QtyRejected, plan_quantity
 from app.core.radar import TopCheck, TopRoi, best_price_roi, choose_books, leg_fresh
-from app.core.roi import best_entry, capacity_tokens, exit_quote
-from app.core.schemas import Fees, Instrument
+from app.core.roi import EntryQuote, ExitQuote, best_entry, capacity_tokens, exit_quote
+from app.core.schemas import Book, Fees, Instrument
 from app.instruments.service import PairRecord
 from app.market.state import MarketState
 from app.strategies.price_gap.recorder import EpisodeSink, NullSink
@@ -39,7 +39,8 @@ CHOOSE_EVERY_MS = 1_000
 CAPACITY_EVERY_MS = 1_000
 TOP_STALE_MS = 60_000  # radar only ranks candidates; quiet contracts are re-seeded from REST every 30 s
 RESUBSCRIBE_COOLDOWN_MS = 5_000
-RADAR_SLICES = 5  # a large catalog's radar is refreshed over this many ticks
+RADAR_SLICES = 5  # a large catalog's radar is refreshed over this many ticks...
+RADAR_MAX_PAIRS_PER_TICK = 1500  # ...but never more pairs than this in one tick (18,000 pairs: every 2.4 s)
 RADAR_FULL_PASS_PAIRS = 500  # up to this many pairs the whole radar is refreshed every tick
 RADAR_PAIRS_PER_TOKEN = 10  # the radar lists coins; each coin brings at most this many of its pairs
 _net_roi = attrgetter("roi_net_pct")
@@ -75,6 +76,27 @@ class _Quote:
     problem: str | None = None
     capacity_usd: Decimal | None = None
     capacity_ts_ms: int = 0
+
+
+@dataclass
+class _BookNumbers:
+    """
+    Size, entry, exit and capacity of one pair computed from exact book objects. MarketState replaces a book on every
+    update, so the same objects mean the same numbers — a quiet pair is not walked again every tick.
+    """
+
+    book_a: Book
+    book_b: Book
+    fees: tuple[Fees, Fees]
+    settings: FeedSettings
+    assessment: Any
+    problem: str | None = None
+    long: Instrument | None = None
+    short: Instrument | None = None
+    qty_tokens: Decimal | None = None
+    entry: EntryQuote | None = None
+    exit: ExitQuote | None = None
+    capacity_usd: Decimal | None = None
 
 
 def _text(value: Decimal | None, digits: int = 8) -> str | None:
@@ -117,13 +139,16 @@ class PriceGapEngine:
         pinned: Callable[[], list[str]] = lambda: [],
         fresh_ms_overrides: Mapping[str, int] | None = None,
         funding: Callable[[str, str], FundingRate | None] = lambda exchange, symbol: None,
+        top_limit_ms_overrides: Mapping[str, int] | None = None,
     ) -> None:
         """
         feeds maps an exchange name to its order-book subscriptions; on_catalog receives every catalog contract;
         fresh_ms_overrides gives venues with slower quotes their own freshness limit (their quotes need no confirmation);
-        funding(exchange, raw symbol) gives the current funding rate of a contract, None when unknown.
+        funding(exchange, raw symbol) gives the current funding rate of a contract, None when unknown;
+        top_limit_ms_overrides gives venues with slow quotes a shorter age limit for best prices in the radar.
         """
         self._funding = funding
+        self._top_limits = dict(top_limit_ms_overrides or {})
         self._fresh_overrides = dict(fresh_ms_overrides or {})
         self._sink: EpisodeSink = sink or NullSink()
         self._pinned = pinned
@@ -141,16 +166,25 @@ class PriceGapEngine:
             exit_after_ms=settings.exit_after_ms,
         )
         self._catalog_keys: frozenset[str] = frozenset()
+        self._catalog_version: int | None = None
         self._records: dict[str, PairRecord] = {}
-        # Per pair key: (exchange a, market key a, exchange b, market key b) — fixed for a key, built once per catalog.
-        self._legs: dict[str, tuple[str, tuple[str, str], str, tuple[str, str]]] = {}
+        # Per pair: (key, record, exchange a, market key a, exchange b, market key b) — built once per catalog version.
+        self._legs: list[tuple[str, PairRecord, str, tuple[str, str], str, tuple[str, str]]] = []
         self._catalog_exchanges: frozenset[str] = frozenset()
-        self._radar_keys: list[str] = []
+        self._fee_pct: dict[str, Decimal] = {}
+        self._token_of: dict[str, str] = {}
+        self._keys_by_token: dict[str, list[str]] = {}
         self._radar_cursor = 0
         self._top_by_key: dict[str, TopRoi] = {}
+        self._tops_stale = True
         self._books: dict[str, int] = {}
         self._last_choose_ms = 0.0
         self._quotes: dict[str, _Quote] = {}
+        self._book_numbers: dict[str, _BookNumbers] = {}
+        # Funding per direction (long leg, short leg), recomputed when a rate or the settlements in the horizon change.
+        self._funding_views: dict[tuple[str, str, str, str], tuple[Any, ...]] = {}
+        # Radar rows without a gap episode, reused while everything they show is unchanged.
+        self._row_memo: dict[str, tuple[tuple[Any, ...], dict[str, Any]]] = {}
         self._episodes: dict[str, EpisodeState] = {}
         self._episode_pair: dict[str, str] = {}
         self._tops: list[TopRoi] = []
@@ -181,10 +215,17 @@ class PriceGapEngine:
         self._sync_catalog()
         if not self._records:
             return
-        self._tops = self._radar(now)
-        if (self._tops or self._pinned()) and now - self._last_choose_ms >= CHOOSE_EVERY_MS:
-            self._choose(now)
-            self._last_choose_ms = now
+        # Fees are looked up once per exchange per tick, not per pair.
+        self._fee_pct = {exchange: self._taker_fee_pct(exchange) for exchange in self._catalog_exchanges}
+        self._radar(now)
+        # Ranking the whole radar costs ~10 ms at 18,000 pairs, so it happens when books are chosen (once a second) and
+        # after the catalog changed; the view between rankings reads current values in the last order.
+        if self._tops_stale or now - self._last_choose_ms >= CHOOSE_EVERY_MS:
+            self._tops = sorted(self._top_by_key.values(), key=_net_roi, reverse=True)
+            self._tops_stale = False
+            if (self._tops or self._pinned()) and now - self._last_choose_ms >= CHOOSE_EVERY_MS:
+                self._choose(now)
+                self._last_choose_ms = now
         for key in list(self._books):
             record = self._records.get(key)
             if record is not None:
@@ -195,62 +236,75 @@ class PriceGapEngine:
     # ── steps ────────────────────────────────────────────────────────────────
 
     def _sync_catalog(self) -> None:
+        version = getattr(self._catalog, "version", None)
+        if version is not None and version == self._catalog_version:
+            return  # the same records as last tick; flags change on the records themselves
+        self._catalog_version = version
         records = self._catalog.records()
         keys = frozenset(record.key for record in records)
-        if keys == self._catalog_keys:
-            self._records = {record.key: record for record in records}
-            return
-        self._catalog_keys = keys
         self._records = {record.key: record for record in records}
-        self._legs = {
-            record.key: (
+        self._legs = [
+            (
+                record.key,
+                record,
                 record.assessment.a.exchange,
                 (record.assessment.a.exchange, record.assessment.a.symbol_raw),
                 record.assessment.b.exchange,
                 (record.assessment.b.exchange, record.assessment.b.symbol_raw),
             )
             for record in records
-        }
-        self._catalog_exchanges = frozenset(exchange for legs in self._legs.values() for exchange in (legs[0], legs[2]))
-        self._radar_keys = list(self._legs)
+        ]
+        if keys == self._catalog_keys:
+            return
+        self._catalog_keys = keys
+        self._catalog_exchanges = frozenset(exchange for legs in self._legs for exchange in (legs[2], legs[4]))
+        self._funding_views = {}
+        self._row_memo = {}
+        self._token_of = {record.key: record.assessment.token for record in records}
+        self._keys_by_token = {}
+        for record in records:
+            self._keys_by_token.setdefault(record.assessment.token, []).append(record.key)
         self._radar_cursor = 0
         self._top_by_key = {key: top for key, top in self._top_by_key.items() if key in keys}
+        self._tops_stale = True
         unique = {(leg.exchange, leg.symbol_raw): leg for record in records for leg in (record.assessment.a, record.assessment.b)}
         instruments = list(unique.values())
         self._state.set_instruments(instruments)
         self._on_catalog(instruments)
 
+    def _fee(self, exchange: str) -> Decimal:
+        fee = self._fee_pct.get(exchange)
+        return self._taker_fee_pct(exchange) if fee is None else fee
+
     def _fees(self, long: Instrument, short: Instrument) -> Fees:
-        return Fees(taker_long_pct=self._taker_fee_pct(long.exchange), taker_short_pct=self._taker_fee_pct(short.exchange))
+        return Fees(taker_long_pct=self._fee(long.exchange), taker_short_pct=self._fee(short.exchange))
 
     def _top_limit_ms(self, exchange: str) -> int:
-        override = self._fresh_overrides.get(exchange)
+        override = self._top_limits.get(exchange)
         return TOP_STALE_MS if override is None else min(TOP_STALE_MS, override)
 
-    def _radar(self, now: float) -> list[TopRoi]:
+    def _radar(self, now: float) -> None:
         """
-        Best-price ROI of every pair, ranked. A large catalog is refreshed a slice per tick, so one tick never stalls the
+        Best-price ROI of every pair into _top_by_key. A large catalog is refreshed a slice per tick, so one tick never stalls the
         event loop for the whole catalog (6,800 pairs over six exchanges took 85 ms a pass); each pair is still refreshed
         within RADAR_SLICES ticks, and books are chosen only once a second anyway.
         """
-        keys = self._radar_keys
-        if len(keys) <= RADAR_FULL_PASS_PAIRS:
-            batch, self._radar_cursor = keys, 0
+        legs = self._legs
+        if len(legs) <= RADAR_FULL_PASS_PAIRS:
+            batch, self._radar_cursor = legs, 0
         else:
-            size = -(-len(keys) // RADAR_SLICES)
+            size = min(-(-len(legs) // RADAR_SLICES), RADAR_MAX_PAIRS_PER_TICK)
             start = self._radar_cursor
-            batch = keys[start : start + size]
-            self._radar_cursor = start + size if start + size < len(keys) else 0
+            batch = legs[start : start + size]
+            self._radar_cursor = start + size if start + size < len(legs) else 0
         # Fees and age limits are looked up once per exchange, not per pair.
-        fee = {exchange: float(self._taker_fee_pct(exchange)) for exchange in self._catalog_exchanges}
+        fee = {exchange: float(self._fee(exchange)) for exchange in self._catalog_exchanges}
         oldest = {exchange: now - self._top_limit_ms(exchange) for exchange in self._catalog_exchanges}
         market_tops = self._state.tops
         ranked = self._top_by_key
-        for key in batch:
-            record = self._records.get(key)
+        for key, record, exchange_a, market_a, exchange_b, market_b in batch:
             roi = None
-            if record is not None and _worth_watching(record):
-                exchange_a, market_a, exchange_b, market_b = self._legs[key]
+            if _worth_watching(record):
                 top_a = market_tops.get(market_a)
                 top_b = market_tops.get(market_b)
                 if top_a is not None and top_b is not None and top_a.received_ms >= oldest[exchange_a] and top_b.received_ms >= oldest[exchange_b]:
@@ -260,7 +314,7 @@ class PriceGapEngine:
                 ranked.pop(key, None)
             else:
                 ranked[key] = roi
-        return sorted(ranked.values(), key=_net_roi, reverse=True)
+        return None
 
     def _choose(self, now: float) -> None:
         by_peak = sorted(self._episodes.items(), key=lambda item: item[1].roi_peak or Decimal(0), reverse=True)
@@ -278,13 +332,31 @@ class PriceGapEngine:
         # Open pairs come first: their exit spread and PnL depend on these books.
         watched = [key for key in self._pinned() if key in self._records] + in_feed + candidates_alive + tracking
         threshold = float(self._settings.min_roi_pct - self._settings.candidate_margin_pct)
-        # Tradable pairs get order books first; pairs flagged suspicious only take slots that are left over.
-        ranked = sorted(self._tops, key=lambda top: not self._records[top.key].tradable)
-        candidates = [top.key for top in ranked if top.roi_net_pct >= threshold]
-        radar = [top.key for top in ranked[: self._settings.radar_rows]]
+        # Tradable pairs get order books first; pairs flagged suspicious only take slots that are left over. The tops are
+        # ranked best-first, so the walk stops once they fall below the threshold and the radar has its tradable pairs.
+        limit = self._settings.radar_rows
+        tradable_candidates: list[str] = []
+        other_candidates: list[str] = []
+        tradable_radar: list[str] = []
+        other_radar: list[str] = []
+        for top in self._tops:
+            above = top.roi_net_pct >= threshold
+            if not above and len(tradable_radar) >= limit:
+                break
+            if self._records[top.key].tradable:
+                if above:
+                    tradable_candidates.append(top.key)
+                if len(tradable_radar) < limit:
+                    tradable_radar.append(top.key)
+            else:
+                if above:
+                    other_candidates.append(top.key)
+                if len(other_radar) < limit:
+                    other_radar.append(top.key)
+        radar = (tradable_radar + other_radar)[:limit]
         chosen = choose_books(
             watched,
-            candidates + radar,
+            tradable_candidates + other_candidates + radar,
             self._books,
             int(now),
             self._settings.book_limit,
@@ -293,6 +365,7 @@ class PriceGapEngine:
         for key in set(self._books) - set(chosen):
             record = self._records.get(key)
             self._quotes.pop(key, None)
+            self._book_numbers.pop(key, None)
             if record is not None:
                 self._state.drop_book((record.assessment.a.exchange, record.assessment.a.symbol_raw))
                 self._state.drop_book((record.assessment.b.exchange, record.assessment.b.symbol_raw))
@@ -346,44 +419,44 @@ class PriceGapEngine:
         exit_spread = None
         if book_a is None or book_b is None or not book_a.asks or not book_b.asks:
             quote.problem = "no_book"
+            self._book_numbers.pop(record.key, None)
         else:
-            price = min(book_a.asks[0].price, book_b.asks[0].price)
-            plan = plan_quantity(self._settings.size_usd, price, long=a, short=b)
-            if isinstance(plan, QtyRejected):
-                quote.problem = plan.reason
+            numbers = self._numbers(record, book_a, book_b)
+            entry, exit = numbers.entry, numbers.exit
+            if entry is None:
+                quote.problem = numbers.problem
             else:
-                entry = best_entry(book_a, book_b, plan.qty_tokens, self._fees(a, b), self._fees(b, a))
-                if entry is None:
-                    quote.problem = "book_too_thin"
+                long, short = numbers.long, numbers.short
+                quote.long, quote.short = long, short
+                quote.long_avg, quote.short_avg = entry.long_avg, entry.short_avg
+                quote.qty_tokens = numbers.qty_tokens
+                quote.roi_gross_pct, quote.roi_net_pct = entry.roi_gross_pct, entry.roi_net_pct
+                quote.exit_spread_pct = exit.exit_spread_pct if exit else None
+                quote.long_exit_avg = exit.long_exit_avg if exit else None
+                quote.short_exit_avg = exit.short_exit_avg if exit else None
+                quote.age_long_ms = age_a if long is a else age_b
+                quote.age_short_ms = age_b if long is a else age_a
+                if not (fresh[key_a] and fresh[key_b]):
+                    quote.problem = "stale"
                 else:
-                    long, short = (a, b) if entry.long_exchange == a.exchange else (b, a)
+                    sample_roi, exit_spread = entry.roi_net_pct, quote.exit_spread_pct
+                # Capacity is refreshed at most once a second, and never twice for the same books.
+                if (
+                    numbers.capacity_usd is None
+                    and entry.roi_net_pct >= self._settings.min_roi_pct - self._settings.candidate_margin_pct
+                    and now - quote.capacity_ts_ms >= CAPACITY_EVERY_MS
+                ):
                     long_book, short_book = (book_a, book_b) if long is a else (book_b, book_a)
-                    exit = exit_quote(long_book, short_book, plan.qty_tokens)
-                    quote.long, quote.short = long, short
-                    quote.long_avg, quote.short_avg = entry.long_avg, entry.short_avg
-                    quote.qty_tokens = plan.qty_tokens
-                    quote.roi_gross_pct, quote.roi_net_pct = entry.roi_gross_pct, entry.roi_net_pct
-                    quote.exit_spread_pct = exit.exit_spread_pct if exit else None
-                    quote.long_exit_avg = exit.long_exit_avg if exit else None
-                    quote.short_exit_avg = exit.short_exit_avg if exit else None
-                    quote.age_long_ms = age_a if long is a else age_b
-                    quote.age_short_ms = age_b if long is a else age_a
-                    if not (fresh[key_a] and fresh[key_b]):
-                        quote.problem = "stale"
-                    else:
-                        sample_roi, exit_spread = entry.roi_net_pct, quote.exit_spread_pct
-                    if entry.roi_net_pct >= self._settings.min_roi_pct - self._settings.candidate_margin_pct and (
-                        now - quote.capacity_ts_ms >= CAPACITY_EVERY_MS
-                    ):
-                        tokens = capacity_tokens(
-                            long_book.asks,
-                            short_book.bids,
-                            self._fees(long, short),
-                            self._settings.min_roi_pct,
-                            record.assessment.common_step_tokens,
-                        )
-                        quote.capacity_usd = tokens * entry.long_avg
-                        quote.capacity_ts_ms = int(now)
+                    tokens = capacity_tokens(
+                        long_book.asks,
+                        short_book.bids,
+                        numbers.fees[0] if long is a else numbers.fees[1],
+                        self._settings.min_roi_pct,
+                        record.assessment.common_step_tokens,
+                    )
+                    numbers.capacity_usd = tokens * entry.long_avg
+                    quote.capacity_usd = numbers.capacity_usd
+                    quote.capacity_ts_ms = int(now)
         self._quotes[record.key] = quote
 
         direction = quote.long.exchange if quote.long else None
@@ -393,6 +466,36 @@ class PriceGapEngine:
                 self._advance(episode_key, record, Sample(int(now), None, None), None)
         if direction is not None:
             self._advance(f"{record.key}>{direction}", record, Sample(int(now), sample_roi, exit_spread), quote)
+
+    def _numbers(self, record: PairRecord, book_a: Book, book_b: Book) -> _BookNumbers:
+        a, b = record.assessment.a, record.assessment.b
+        fees = (self._fees(a, b), self._fees(b, a))
+        cached = self._book_numbers.get(record.key)
+        if (
+            cached is not None
+            and cached.book_a is book_a
+            and cached.book_b is book_b
+            and cached.settings is self._settings
+            and cached.assessment is record.assessment
+            and cached.fees == fees
+        ):
+            return cached
+        numbers = _BookNumbers(book_a, book_b, fees, self._settings, record.assessment)
+        price = min(book_a.asks[0].price, book_b.asks[0].price)
+        plan = plan_quantity(self._settings.size_usd, price, long=a, short=b, step=record.assessment.common_step_tokens)
+        if isinstance(plan, QtyRejected):
+            numbers.problem = plan.reason
+        else:
+            entry = best_entry(book_a, book_b, plan.qty_tokens, fees[0], fees[1])
+            if entry is None:
+                numbers.problem = "book_too_thin"
+            else:
+                long, short = (a, b) if entry.long_exchange == a.exchange else (b, a)
+                long_book, short_book = (book_a, book_b) if long is a else (book_b, book_a)
+                numbers.long, numbers.short, numbers.qty_tokens, numbers.entry = long, short, plan.qty_tokens, entry
+                numbers.exit = exit_quote(long_book, short_book, plan.qty_tokens)
+        self._book_numbers[record.key] = numbers
+        return numbers
 
     def _advance(self, episode_key: str, record: PairRecord, sample: Sample, quote: _Quote | None) -> None:
         state, events = step(self._episodes.get(episode_key), sample, self._rules)
@@ -441,6 +544,23 @@ class PriceGapEngine:
         short = quote.short if quote and quote.short else None
         if long is None and top is not None:
             long, short = (assessment.a, assessment.b) if top.long_exchange == assessment.a.exchange else (assessment.b, assessment.a)
+        funding, funding_view = (None, None) if long is None or short is None else self._pair_funding(long, short, now)
+        memo_signature = None
+        if episode is None:
+            # Everything such a row shows; a radar pair without books keeps its row until its best prices are re-ranked.
+            memo_signature = (
+                record.assessment,
+                record.blacklisted,
+                record.suspicious,
+                self._settings,
+                funding_view,
+                long,
+                short,
+                None if quote is None else (quote.qty_tokens, quote.roi_net_pct, quote.capacity_usd, quote.problem),
+            )
+            memo = self._row_memo.get(record.key)
+            if memo is not None and memo[0] == memo_signature:
+                return memo[1]
         block = None
         if record.blacklisted:
             block = "blacklisted"
@@ -453,20 +573,6 @@ class PriceGapEngine:
         size = self._settings.size_usd
         lifetime_ms = int(now - episode.detected_ms) if episode else None
         profit_pct = quote.roi_net_pct if quote else None
-        funding = None
-        funding_view = None
-        if long is not None and short is not None:
-            rate_long, rate_short = self._funding(long.exchange, long.symbol_raw), self._funding(short.exchange, short.symbol_raw)
-            funding = pair_funding(rate_long, rate_short, int(now), self._settings.funding_horizon_h)
-            funding_view = {
-                "long": _rate_view(rate_long),
-                "short": _rate_view(rate_short),
-                "hourly_pct": _text(funding.hourly_pct, 4) if funding else None,
-                "horizon_pct": _text(funding.horizon_pct, 4) if funding else None,
-                "horizon_usd": _text(funding.horizon_pct * size / 100, 4) if funding else None,
-                "next_ms": funding.next_ms if funding else None,
-                "next_usd": _text(funding.next_pct * size / 100, 4) if funding and funding.next_pct is not None else None,
-            }
         # Expected result: the spread after book and fees if prices converge, plus funding over the horizon.
         total_pct = None if profit_pct is None else profit_pct + (funding.horizon_pct if funding else Decimal(0))
         score = None
@@ -479,7 +585,7 @@ class PriceGapEngine:
                 assessment.volume24h_weak_usd,
                 record.suspicious or record.blacklisted,
             )
-        return {
+        row = {
             "key": record.key,
             "token": assessment.token,
             "long": None if long is None else {"exchange": long.exchange, "symbol": long.symbol_raw, "url": trade_url(long)},
@@ -505,13 +611,45 @@ class PriceGapEngine:
             if score is None
             else {"result": score.result, "depth": score.depth, "stability": score.stability, "liquidity": score.liquidity},
         }
+        if memo_signature is None:
+            self._row_memo.pop(record.key, None)
+        else:
+            self._row_memo[record.key] = (memo_signature, row)
+        return row
+
+    def _pair_funding(self, long: Instrument, short: Instrument, now: float) -> tuple[PairFunding | None, dict[str, Any]]:
+        """Funding of one direction, recomputed only when a rate changes or a settlement enters or leaves the horizon."""
+        rate_long, rate_short = self._funding(long.exchange, long.symbol_raw), self._funding(short.exchange, short.symbol_raw)
+        direction = (long.exchange, long.symbol_raw, short.exchange, short.symbol_raw)
+        cached = self._funding_views.get(direction)
+        if (
+            cached is not None
+            and (cached[0] is None or now < cached[0])
+            and cached[1] is self._settings
+            and cached[2] == rate_long
+            and cached[3] == rate_short
+        ):
+            return cached[4], cached[5]
+        size = self._settings.size_usd
+        funding = pair_funding(rate_long, rate_short, int(now), self._settings.funding_horizon_h)
+        view = {
+            "long": _rate_view(rate_long),
+            "short": _rate_view(rate_short),
+            "hourly_pct": _text(funding.hourly_pct, 4) if funding else None,
+            "horizon_pct": _text(funding.horizon_pct, 4) if funding else None,
+            "horizon_usd": _text(funding.horizon_pct * size / 100, 4) if funding else None,
+            "next_ms": funding.next_ms if funding else None,
+            "next_usd": _text(funding.next_pct * size / 100, 4) if funding and funding.next_pct is not None else None,
+        }
+        self._funding_views[direction] = (funding.changes_ms if funding else None, self._settings, rate_long, rate_short, funding, view)
+        return funding, view
 
     def _is_current_direction(self, episode_key: str) -> bool:
         quote = self._quotes.get(self._episode_pair[episode_key])
         return quote is not None and quote.long is not None and episode_key.endswith(f">{quote.long.exchange}")
 
     def _build_view(self, now: float) -> dict[str, Any]:
-        tops_by_key = {top.key: top for top in self._tops}
+        tops_by_key = self._top_by_key
         rows = []
         in_feed_pairs = set()
         # One row per pair: when both directions are in the feed, the one the book currently favours is shown.
@@ -534,20 +672,32 @@ class PriceGapEngine:
 
         # The radar lists coins: the best current spreads bring their coin in, with that coin's other pairs alongside.
         episodes_by_pair = {self._episode_pair[key]: state for key, state in self._episodes.items() if key in self._episode_pair}
-        radar = []
-        pairs_per_token: dict[str, int] = {}
+        # Coins are picked from the ranked tops, stopping at radar_rows; their other pairs come from the token index, so
+        # the view never walks the whole catalog (18,000 pairs over ten exchanges).
+        # As with books, coins brought in by a tradable pair come first; a spread seen only on suspicious pairs (often a
+        # different asset under the same ticker) takes a line only when slots are left.
+        limit = self._settings.radar_rows
+        coins: dict[str, None] = {}
+        suspicious_coins: dict[str, None] = {}
         for top in self._tops:
+            if len(coins) >= limit:
+                break
             if top.key in in_feed_pairs:
                 continue
-            record = self._records[top.key]
-            token = record.assessment.token
-            taken = pairs_per_token.get(token)
-            if taken is None and len(pairs_per_token) >= self._settings.radar_rows:
-                continue
-            if taken is not None and taken >= RADAR_PAIRS_PER_TOKEN:
-                continue
-            pairs_per_token[token] = (taken or 0) + 1
-            radar.append(self._row(record, self._quotes.get(top.key), top, now, episodes_by_pair.get(top.key)))
+            (coins if self._records[top.key].tradable else suspicious_coins)[self._token_of[top.key]] = None
+        for token in suspicious_coins:
+            if len(coins) >= limit:
+                break
+            coins.setdefault(token, None)
+        radar = []
+        for token in coins:
+            ranked = sorted(
+                (self._top_by_key[key] for key in self._keys_by_token[token] if key in self._top_by_key and key not in in_feed_pairs),
+                key=_net_roi,
+                reverse=True,
+            )
+            for top in ranked[:RADAR_PAIRS_PER_TOKEN]:
+                radar.append(self._row(self._records[top.key], self._quotes.get(top.key), top, now, episodes_by_pair.get(top.key)))
 
         return {
             "rows": rows,

@@ -67,7 +67,7 @@ def test_invalid_body_is_rejected_without_echoing_it(setup):
 
 def test_unknown_exchange_is_404(setup):
     client, _ = setup
-    assert client.post("/api/exchanges/bybit/check", headers=AUTH).status_code == 404
+    assert client.post("/api/exchanges/okx/check", headers=AUTH).status_code == 404
 
 
 def test_check_and_delete_flow(setup):

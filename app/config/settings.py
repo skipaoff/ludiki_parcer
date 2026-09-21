@@ -91,6 +91,22 @@ class BingxSettings(_Section):
     enabled: bool = True
 
 
+class BybitSettings(_Section):
+    enabled: bool = True
+
+
+class BitgetSettings(_Section):
+    enabled: bool = True
+
+
+class KucoinSettings(_Section):
+    enabled: bool = True
+
+
+class HyperliquidSettings(_Section):
+    enabled: bool = True
+
+
 class VariationalSettings(_Section):
     """Variational Omni publishes market statistics only; there is no trading API yet, so it is read-only."""
 
@@ -101,7 +117,8 @@ class VariationalSettings(_Section):
     max_quote_age_ms: int = Field(default=30000, ge=1000)
 
 
-EXCHANGE_ORDER = ("binance", "mexc", "gate", "aster", "bingx", "variational")
+# The order fixes which exchange is leg "a" of a pair key, so new exchanges are only ever appended before variational.
+EXCHANGE_ORDER = ("binance", "mexc", "gate", "aster", "bingx", "bybit", "bitget", "kucoin", "hyperliquid", "variational")
 READ_ONLY_EXCHANGES = frozenset({"variational"})
 
 
@@ -114,6 +131,10 @@ class ExchangesSettings(_Section):
     gate: GateSettings = GateSettings()
     aster: AsterSettings = AsterSettings()
     bingx: BingxSettings = BingxSettings()
+    bybit: BybitSettings = BybitSettings()
+    bitget: BitgetSettings = BitgetSettings()
+    kucoin: KucoinSettings = KucoinSettings()
+    hyperliquid: HyperliquidSettings = HyperliquidSettings()
     variational: VariationalSettings = VariationalSettings()
 
     def enabled_names(self) -> list[str]:
@@ -146,11 +167,19 @@ class FeedSettings(_Section):
     default_taker_fee_gate_pct: Decimal = Field(default=Decimal("0.075"), ge=0)
     default_taker_fee_aster_pct: Decimal = Field(default=Decimal("0.035"), ge=0)
     default_taker_fee_bingx_pct: Decimal = Field(default=Decimal("0.05"), ge=0)
+    default_taker_fee_bybit_pct: Decimal = Field(default=Decimal("0.055"), ge=0)
+    default_taker_fee_bitget_pct: Decimal = Field(default=Decimal("0.06"), ge=0)
+    default_taker_fee_kucoin_pct: Decimal = Field(default=Decimal("0.06"), ge=0)
+    default_taker_fee_hyperliquid_pct: Decimal = Field(default=Decimal("0.045"), ge=0)
     default_taker_fee_variational_pct: Decimal = Field(default=Decimal("0"), ge=0)
     mexc_ticker_poll_ms: int = Field(default=1000, ge=500)
     gate_ticker_poll_ms: int = Field(default=1000, ge=500)
     bingx_ticker_poll_ms: int = Field(default=1000, ge=500)
     bingx_premium_poll_ms: int = Field(default=5000, ge=1000)
+    bybit_ticker_poll_ms: int = Field(default=1000, ge=500)
+    bitget_ticker_poll_ms: int = Field(default=1000, ge=500)
+    kucoin_ticker_poll_ms: int = Field(default=1000, ge=500)
+    hyperliquid_poll_ms: int = Field(default=2000, ge=1000)  # weight 20 of 1,200 a minute per IP
 
     def default_taker_fee_pct(self, exchange: str) -> Decimal:
         return getattr(self, f"default_taker_fee_{exchange}_pct")
@@ -170,6 +199,10 @@ class TradingSettings(_Section):
     leverage_gate: int = Field(default=3, ge=1, le=50)
     leverage_aster: int = Field(default=3, ge=1, le=50)
     leverage_bingx: int = Field(default=3, ge=1, le=50)
+    leverage_bybit: int = Field(default=3, ge=1, le=50)
+    leverage_bitget: int = Field(default=3, ge=1, le=50)
+    leverage_kucoin: int = Field(default=3, ge=1, le=50)
+    leverage_hyperliquid: int = Field(default=3, ge=1, le=50)
 
     def leverage(self, exchange: str) -> int:
         return getattr(self, f"leverage_{exchange}", 1)

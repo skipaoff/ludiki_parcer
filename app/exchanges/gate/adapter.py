@@ -12,6 +12,7 @@ Endpoints and shapes: docs/EXCHANGES.md, section Gate. Public shapes checked liv
 
 from __future__ import annotations
 
+import asyncio
 from decimal import Decimal
 from typing import Any, Mapping
 
@@ -27,6 +28,12 @@ from app.exchanges.ccxt_support import describe_error, error_code, is_unknown_ou
 from app.system.tls import with_shared_context
 
 SETTLE = {"settle": "usdt"}
+# The contract list is 1.3 MB without compression, and from some networks Gate delivers ~60 KB/s per connection (18-21 s,
+# past any sane timeout): it is fetched in pages of 100, ten at a time, which arrives in about four seconds.
+CONTRACTS_PAGE = 100
+CONTRACTS_PAGES_AT_ONCE = 10
+CONTRACTS_MAX_WAVES = 10
+CATALOG_TIMEOUT_S = 60  # the ticker list is 0.5 MB in one piece
 FEE_REFERENCE_CONTRACT = "BTC_USDT"
 RECENT_ORDERS_LIMIT = 100
 
@@ -45,6 +52,20 @@ def _positive(value: Any) -> Decimal | None:
 def custom_text(client_order_id: str) -> str:
     """Gate custom order ids must start with "t-"."""
     return client_order_id if client_order_id.startswith("t-") else f"t-{client_order_id}"
+
+
+async def fetch_contract_pages(get_page: Any) -> list[dict[str, Any]]:
+    """Every contract, pages fetched in parallel waves until a short page; a contract listed mid-way is counted once."""
+    by_name: dict[str, dict[str, Any]] = {}
+    for wave in range(CONTRACTS_MAX_WAVES):
+        offsets = [(wave * CONTRACTS_PAGES_AT_ONCE + index) * CONTRACTS_PAGE for index in range(CONTRACTS_PAGES_AT_ONCE)]
+        pages = await asyncio.gather(*(get_page({**SETTLE, "limit": CONTRACTS_PAGE, "offset": offset}) for offset in offsets))
+        for page in pages:
+            for item in page or []:
+                by_name[str(item.get("name"))] = item
+        if any(len(page or []) < CONTRACTS_PAGE for page in pages):
+            break
+    return list(by_name.values())
 
 
 def parse_instruments(contracts: list[dict[str, Any]]) -> list[Instrument]:
@@ -248,16 +269,19 @@ class GateAdapter:
         ))
         # Probes get their own client so the rate limiter never queues them behind catalog requests.
         self._probe_client = with_shared_context(ccxt.gate({"enableRateLimit": False, "timeout": int(timeout_s * 1000)}))
+        # Public catalog downloads are slow and large; their own client keeps the long timeout away from orders.
+        self._catalog_client = with_shared_context(ccxt.gate({"enableRateLimit": False, "timeout": CATALOG_TIMEOUT_S * 1000}))
 
     async def close(self) -> None:
         await self._client.close()
         await self._probe_client.close()
+        await self._catalog_client.close()
 
     async def load_instruments(self) -> list[Instrument]:
-        return parse_instruments(await self._client.public_futures_get_settle_contracts(dict(SETTLE)))
+        return parse_instruments(await fetch_contract_pages(self._catalog_client.public_futures_get_settle_contracts))
 
     async def fetch_quotes(self) -> dict[str, Quote]:
-        return parse_quotes(await self._client.public_futures_get_settle_tickers(dict(SETTLE)))
+        return parse_quotes(await self._catalog_client.public_futures_get_settle_tickers(dict(SETTLE)))
 
     async def probe_clock(self) -> ClockProbe:
         sent = now_ms()

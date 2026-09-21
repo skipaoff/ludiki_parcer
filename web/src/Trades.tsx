@@ -7,7 +7,7 @@ import { useCallback, useEffect, useState } from "react";
 import { compact } from "./Pairs";
 import { apiGet } from "./session";
 
-const TRADING_EXCHANGES = ["binance", "mexc", "gate", "aster", "bingx"];
+const TRADING_EXCHANGES = ["binance", "mexc", "gate", "aster", "bingx", "bybit", "bitget", "kucoin", "hyperliquid"];
 
 interface TradeRow {
   id: string;

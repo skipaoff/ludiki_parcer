@@ -25,11 +25,26 @@ from app.storage.catalog import StoredPair, pair_key, save_catalog, set_pair_fla
 
 log = logging.getLogger(__name__)
 
-RETRY_AFTER_FAILURE_S = 30
+RETRY_AFTER_FAILURE_S = 30  # an exchange that never loaded is retried after this, doubling on every miss...
+RETRY_MISSING_MAX_S = 300  # ...up to this
+RETRY_WITH_LAST_GOOD_S = 300
 
 
 class UnknownPair(KeyError):
     pass
+
+
+def assess_catalog(
+    by_exchange: dict[str, list[Instrument]],
+    quotes: dict[tuple[str, str], Quote],
+    order: list[str],
+    max_price_gap_pct: Decimal,
+    max_index_gap_pct: Decimal,
+) -> list[PairAssessment]:
+    return [
+        assess_pair(a, b, quotes.get((a.exchange, a.symbol_raw)), quotes.get((b.exchange, b.symbol_raw)), max_price_gap_pct, max_index_gap_pct)
+        for a, b in match_all(by_exchange, order)
+    ]
 
 
 @dataclass
@@ -91,26 +106,50 @@ class InstrumentService:
         self._settings = settings
         self._clock = clock
         self._pairs: dict[str, PairRecord] = {}
+        # Bumps whenever the set of pair records is replaced, so readers can skip rebuilding what did not change.
+        self.version = 0
         self._refreshed_at_ms: int | None = None
         self._refreshing = False
-        self._last_error: str | None = None
+        self._failures: dict[str, str] = {}
         self._lock = asyncio.Lock()
 
+    @property
+    def _last_error(self) -> str | None:
+        return "; ".join(f"{name}: {error}" for name, error in self._failures.items())[:300] or None
+
+    def missing(self) -> list[str]:
+        """Enabled exchanges without a single good load yet."""
+        return [name for name in self._exchanges if name not in self._last_good]
+
     async def run(self) -> None:
+        full_due = 0.0
+        misses = 0
         while True:
             try:
-                await self.refresh()
+                if time.monotonic() >= full_due:
+                    await self.refresh()
+                    # An exchange that failed with a last good load standing in is retried less eagerly, since every full
+                    # refresh re-assesses the whole catalog.
+                    pause = RETRY_WITH_LAST_GOOD_S if self._failures else self._settings.refresh_interval_s
+                    full_due = time.monotonic() + min(pause, self._settings.refresh_interval_s)
+                elif self.missing():
+                    await self.refresh(only=self.missing())
             except Exception:
                 log.exception("instrument refresh failed")
-            # An exchange that failed (a startup timeout is common) is retried soon instead of an hour later.
-            missing = any(name not in self._last_good for name in self._exchanges) or self._last_error is not None
-            await asyncio.sleep(RETRY_AFTER_FAILURE_S if missing else self._settings.refresh_interval_s)
+            # An exchange that never loaded (a startup timeout is common, or a venue unreachable for the day) is retried
+            # alone and ever less often; the catalog is rebuilt only when it finally answers.
+            misses = misses + 1 if self.missing() else 0
+            pause = full_due - time.monotonic()
+            if misses:
+                pause = min(pause, RETRY_AFTER_FAILURE_S * 2 ** min(misses - 1, 8), RETRY_MISSING_MAX_S)
+            await asyncio.sleep(max(1.0, pause))
 
-    async def refresh(self) -> dict[str, Any]:
+    async def refresh(self, only: list[str] | None = None) -> dict[str, Any]:
+        """Loads every enabled exchange, or only the named ones with the rest taken from their last good load."""
         async with self._lock:
             self._refreshing = True
             try:
-                return await self._refresh()
+                return await self._refresh(only)
             finally:
                 self._refreshing = False
 
@@ -119,38 +158,33 @@ class InstrumentService:
         instruments, quotes = await asyncio.gather(adapter.load_instruments(), adapter.fetch_quotes())
         return instruments, quotes
 
-    async def _refresh(self) -> dict[str, Any]:
-        results = await asyncio.gather(*(self._load(name) for name in self._exchanges), return_exceptions=True)
-        loaded: dict[str, tuple[list[Instrument], dict[str, Quote]]] = {}
+    async def _refresh(self, only: list[str] | None) -> dict[str, Any]:
+        names = self._exchanges if only is None else [name for name in self._exchanges if name in only]
+        results = await asyncio.gather(*(self._load(name) for name in names), return_exceptions=True)
         failures = {}
-        for name, result in zip(self._exchanges, results):
+        for name, result in zip(names, results):
             if isinstance(result, BaseException):
                 failures[name] = f"{type(result).__name__}: {result}"[:300]
-                # One exchange failing must not drop its pairs: the last good load stands in until it recovers.
-                if name in self._last_good:
-                    loaded[name] = self._last_good[name]
                 continue
-            loaded[name] = result
             self._last_good[name] = result
+            self._failures.pop(name, None)
         if failures:
-            self._last_error = "; ".join(f"{name}: {error}" for name, error in failures.items())[:300]
-            self._journal.emit(Level.WARNING, "instruments", "refresh_failed", error=self._last_error, exchanges=sorted(failures))
+            self._failures.update(failures)
+            error = "; ".join(f"{name}: {error}" for name, error in failures.items())[:300]
+            self._journal.emit(Level.WARNING, "instruments", "refresh_failed", error=error, exchanges=sorted(failures))
+        if only is not None and len(failures) == len(names):
+            return self.summary()  # nothing new arrived: the catalog stands as it is
+        # One exchange failing must not drop its pairs: the last good load stands in until it recovers.
+        loaded = {name: self._last_good[name] for name in self._exchanges if name in self._last_good}
         if len(loaded) < 2:
             return self.summary()
 
         by_exchange = {name: instruments for name, (instruments, _) in loaded.items()}
         quotes = {(name, symbol): quote for name, (_, exchange_quotes) in loaded.items() for symbol, quote in exchange_quotes.items()}
-        assessments = [
-            assess_pair(
-                a,
-                b,
-                quotes.get((a.exchange, a.symbol_raw)),
-                quotes.get((b.exchange, b.symbol_raw)),
-                self._settings.max_price_gap_pct,
-                self._settings.max_index_gap_pct,
-            )
-            for a, b in match_all(by_exchange, self._exchanges)
-        ]
+        # Ten exchanges make some 18,000 pairs and half a second of Decimal work: done off the event loop.
+        assessments = await asyncio.to_thread(
+            assess_catalog, by_exchange, quotes, self._exchanges, self._settings.max_price_gap_pct, self._settings.max_index_gap_pct
+        )
         all_instruments = [instrument for instruments in by_exchange.values() for instrument in instruments]
 
         stored: dict[str, StoredPair] = {}
@@ -176,9 +210,8 @@ class InstrumentService:
             )
 
         self._pairs = pairs
+        self.version += 1
         self._refreshed_at_ms = int(self._clock() * 1000)
-        if not failures:
-            self._last_error = None
         summary = self.summary()
         self._journal.emit(
             Level.INFO,

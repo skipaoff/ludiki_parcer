@@ -32,9 +32,9 @@
 
 - **Адреса [проверено 13.09.2026]:** `wss://fstream.binance.com/public/stream` для `bookTicker` и стаканов (подписка сообщением `{"method": "SUBSCRIBE", "params": [...], "id": 1}`), `wss://fstream.binance.com/market/stream` для `!markPrice@arr@1s`. Старый `/stream` пока тоже отвечает.
 - **Формат кадра:** `{"stream": "...", "data": {...}}`. `bookTicker`: `s`, `b`, `B`, `a`, `A`, `T`, `E`. `depth20@100ms`: `e = depthUpdate`, `b` и `a` — массивы `[цена, количество]` строками, `T`. Ответ на подписку — `{"result": null, "id": 1}`.
-- **Частота [проверено]:** `bookTicker` BTCUSDT около 220 сообщений в секунду, 1000PEPEUSDT около 24; `depth20@100ms` около 9 в секунду. Оба потока шлют данные только при изменении: после подписки у тихого контракта `bookTicker` может молчать долго, поэтому терминал раз в 30 с досевает лучшие цены из `GET /fapi/v1/ticker/bookTicker`.
+- **Частота [проверено]:** `bookTicker` BTCUSDT около 220 сообщений в секунду, 1000PEPEUSDT около 24; `depth20@100ms` около 9 в секунду. Оба потока шлют данные только при изменении: после подписки у тихого контракта `bookTicker` может молчать долго, поэтому лучшие цены берутся из `GET /fapi/v1/ticker/bookTicker` (см. ниже).
 - **`!bookTicker`** — лучшие цены по всем символам, но обновляется **раз в 5 секунд**. Для радара не подходит.
-- **`<symbol>@bookTicker`** — лучшие цены по одному символу в реальном времени. Радар строим на них.
+- **`<symbol>@bookTicker`** — лучшие цены по одному символу в реальном времени, **но не на этой машине [проверено 15.09.2026]**: кадры приходили с опозданием 2 с по медиане и до 4 с даже на десяти символах (`depth20@100ms` тем же маршрутом — без опоздания), а соединение с 200 такими потоками Binance рвал примерно раз в 20 с без кадра закрытия. Радар Binance — опрос `GET /fapi/v1/ticker/bookTicker` (все символы) раз в секунду: 22 КБ в gzip, ответ ~0,3 с, вес 5 из 2400 в минуту.
 - **`<symbol>@depth<5|10|20>@<100ms|250ms|500ms>`** — частичный стакан. Используем `depth20@100ms`.
 - **`!markPrice@arr@1s`** — mark (`p`) и index (`i`) цены по всем символам раз в секунду, маршрут `/market` [проверено 13.09.2026]. Терминал пишет их в снимки радара.
 - **Лимит:** до 200 потоков на одно соединение для фьючерсов [ccxt]. Соединение живёт не больше суток, обрывы плановые [проверить, этап 3].
@@ -176,8 +176,8 @@
 
 | Эндпоинт | Что берём |
 |---|---|
-| `GET /api/v4/futures/usdt/contracts` | 981 контракт. `name` (`BTC_USDT`), `quanto_multiplier` — **токенов в одном контракте** (BTC 0,0001, PEPE 10 000 000), `order_size_min`/`order_size_max`/`market_order_size_max` в контрактах, `order_price_round`, `status` (`trading`), `in_delisting`, `is_pre_market`, `type` (`direct`), `enable_decimal`, `taker_fee_rate` (0,00075). Контракты с дробным размером терминал торгует целыми контрактами |
-| `GET /api/v4/futures/usdt/tickers` | `highest_bid`, `lowest_ask`, `mark_price`, `index_price`, `volume_24h_quote` (оборот в USDT). Терминал опрашивает раз в секунду — это радар Gate |
+| `GET /api/v4/futures/usdt/contracts?limit=100&offset=` | 972 контракта. **Список целиком — 1,27 МБ без сжатия, и с этой сети Gate отдаёт около 60 КБ/с на соединение: 18–21 с и таймаут [проверено 15.09.2026].** Терминал берёт страницами по 100 (максимум `limit`), по десять запросов разом — весь список за 4–5 с; контракт, появившийся между страницами, считается один раз. `name` (`BTC_USDT`), `quanto_multiplier` — **токенов в одном контракте** (BTC 0,0001, PEPE 10 000 000), `order_size_min`/`order_size_max`/`market_order_size_max` в контрактах, `order_price_round`, `status` (`trading`), `in_delisting`, `is_pre_market`, `type` (`direct`), `enable_decimal`, `taker_fee_rate` (0,00075). Контракты с дробным размером терминал торгует целыми контрактами |
+| `GET /api/v4/futures/usdt/tickers` | `highest_bid`, `lowest_ask`, `mark_price`, `index_price`, `volume_24h_quote` (оборот в USDT). Терминал опрашивает раз в секунду — это радар Gate. Ответ 0,5 МБ и с этой сети идёт до 8 с, поэтому таймаут опроса 20 с, а возраст цен считается от момента запроса, а не ответа |
 | `GET /api/v4/spot/time` | `server_time` в мс — пинг и часы |
 | `wss://fx-ws.gateio.ws/v4/ws/usdt`, `futures.order_book` с `["BTC_USDT", "20", "0"]` | событие `all` — **полный снимок** 20 уровней около 9 раз в секунду; уровень `{"p": цена, "s": размер в контрактах}`. Подписка: `{"time", "channel", "event": "subscribe", "payload"}`, пинг `futures.ping` |
 | то же, `futures.book_ticker` | `b`, `B`, `a`, `A`, `t` в реальном времени (терминал пока не использует) |
@@ -291,6 +291,10 @@
 | MEXC | `GET https://api.mexc.com/api/v1/contract/funding_rate` (все контракты, 20 КБ сжатыми): `fundingRate`, `nextSettleTime` | `collectCycle` в часах: 4 — 594, 8 — 587, 1 — 10, 24 — 1 |
 | Gate | `GET /api/v4/futures/usdt/tickers`: `funding_rate` | `GET /futures/usdt/contracts`: `funding_interval` (с), `funding_next_apply` (с). Список 1,2 МБ без сжатия и отвечал до 20 с, поэтому раз в 30 минут; следующий расчёт сдвигается на целые интервалы |
 | BingX | `GET /openApi/swap/v2/quote/premiumIndex`: `lastFundingRate`, `nextFundingTime` | `fundingIntervalHours`: 8 — 706, 4 — 509, 1 — 21 |
+| Bybit | `GET /v5/market/tickers?category=linear`: `fundingRate`, `nextFundingTime` | `fundingIntervalHour` в том же ответе (из 886 строк: 8 ч — 428, 4 ч — 415, 1 ч — 3, пусто — 40, тогда терминал считает 8 ч) |
+| Bitget | `GET /api/v2/mix/market/current-fund-rate?productType=USDT-FUTURES`: `fundingRate`, `nextUpdate` | `fundingRateInterval` в часах в том же ответе (из 815: 8 ч — 426, 4 ч — 385, 1 ч — 4) |
+| KuCoin | `GET /api/v1/contracts/active`: `fundingFeeRate`, `nextFundingRateDateTime` | `currentFundingRateGranularity` (мс) в том же ответе (из 683: 4 ч — 427, 8 ч — 238, 1 ч — 3, нет поля — 15) |
+| Hyperliquid | `POST /info {"type": "metaAndAssetCtxs"}`: `funding` — **ставка за час** | час; ближайший расчёт — ближайший целый час |
 | Variational | `GET /metadata/stats`: `funding_rate` — **годовая** доля (0,1095 = 10,95% в год) | `funding_interval_s` (14 400 — 302, 28 800 — 239, 3 600 — 6, 0 — 6); времени расчёта нет — терминал считает начисление пропорционально времени |
 
 **Сеть до локального терминала [проверено 15.09.2026].** На машине разработки несжатые ответы по loopback около 90 КБ примерно в каждом четвёртом случае обрывались через ~19 с (`ConnectionResetError`) — даже у пустого тестового сервера; сжатые gzip проходят всегда, кадры вебсокета не страдают. API терминала сжимает ответы больше 4 КБ.
@@ -309,15 +313,135 @@
 
 ---
 
+## Bybit USDT Perpetual (подключена 15.09.2026)
+
+**Библиотека:** в ccxt биржа называется `bybit`, API v5, `category=linear`. Ответ всегда `{"retCode": 0, "result": {...}}`.
+
+### Публичная часть [проверено 15.09.2026]
+
+| Эндпоинт | Что берём |
+|---|---|
+| `GET /v5/market/instruments-info?category=linear` | 762 бессрочных контракта на USDT (`contractType` `LinearPerpetual`, `status` `Trading`, `settleCoin` USDT). `lotSizeFilter.qtyStep`, `minOrderQty`, `maxMktOrderQty`, `minNotionalValue` — в монетах символа (`1000PEPEUSDT` — лоты по 1000 PEPE) |
+| `GET /v5/market/tickers?category=linear` | `bid1Price`, `ask1Price`, `markPrice`, `indexPrice`, `turnover24h` (USDT) — радар Bybit, опрос раз в секунду |
+| `GET /v5/market/time` | пинг и часы |
+| `wss://stream.bybit.com/v5/public/linear`, `orderbook.50.{symbol}` | снимок (`type` `snapshot`) и дельты (`delta`): `b`/`a` — `[цена, размер]`, размер 0 — уровень убрать. Терминал держит до 50 стаканов на соединение, по 10 подписок в сообщении, свой пинг `{"op":"ping"}` раз в 20 с |
+
+Лучшие цены REST совпали с верхом вебсокетного стакана 59 раз из 65; возраст ответа тикеров: медиана 883 мс, максимум 1,7 с.
+
+### Приватная часть [док, проверить пробной сделкой]
+
+| Эндпоинт | Что делаем |
+|---|---|
+| `GET /v5/user/query-api` | `readOnly`, `permissions.Wallet` со словом `Withdraw` — вывод включён, `ContractTrade`/`Derivatives` — фьючерсы, `ips` (`["*"]` — без привязки) |
+| `GET /v5/account/wallet-balance?accountType=UNIFIED` | `totalEquity`, `totalAvailableBalance`, `totalInitialMargin`, кошелёк USDT |
+| `GET /v5/position/list?category=linear&settleCoin=USDT` | `size` без знака и `side` Buy/Sell, `avgPrice`, `markPrice`, `liqPrice`, `leverage`, `positionIdx` 0 — one-way |
+| `GET /v5/account/fee-rate?category=linear&symbol=` | `takerFeeRate`, `makerFeeRate` долями. Без ключа терминал считает тейкер 0,055% |
+| `POST /v5/position/set-leverage` | код 110043 «плечо уже такое» — не ошибка. **Режим маржи на Bybit общий для счёта**, терминал его не меняет — выставьте нужный в приложении биржи |
+| `POST /v5/order/create` | `orderType` `Market`, `orderLinkId` — свой id, `positionIdx` 0, `reduceOnly` на закрытии |
+| `GET /v5/order/realtime`, затем `/v5/order/history` | статус по `orderLinkId`: живые ордера в первом, исполненные во втором |
+| `GET /v5/execution/list?orderId=` | `execId`, `execPrice`, `execQty`, `execFee`, `isMaker` |
+| `GET /v5/account/transaction-log?type=SETTLEMENT` | фандинг, поле `funding`: плюс — получено. Запрашивается окнами по 7 дней с курсором |
+
+---
+
+## Bitget USDT-M Futures (подключена 15.09.2026)
+
+**Библиотека:** в ccxt биржа называется `bitget`, API v2 (`/api/v2/mix/...`), `productType=USDT-FUTURES`. **Ключ с парольной фразой:** при создании ключа Bitget просит passphrase — в терминале это третье поле карточки биржи.
+
+### Публичная часть [проверено 15.09.2026]
+
+| Эндпоинт | Что берём |
+|---|---|
+| `GET /api/v2/mix/market/contracts?productType=USDT-FUTURES` | 787 контрактов с `symbolStatus` `normal`. `sizeMultiplier` — шаг количества в монетах символа, `minTradeNum`, `maxMarketOrderQty`, `minTradeUSDT`; шаг цены = `priceEndStep` × 10^−`pricePlace` |
+| `GET /api/v2/mix/market/tickers?productType=USDT-FUTURES` | `bidPr`, `askPr`, `markPrice`, `indexPrice`, `usdtVolume` — радар Bitget, опрос раз в секунду |
+| `GET /api/v2/public/time` | пинг и часы |
+| `wss://ws.bitget.com/v2/ws/public`, канал `books15` | снимки 15 уровней, `data[].bids`/`asks` — `[цена, размер в монетах]`; текстовый пинг `ping` раз в 25 с |
+
+Лучшие цены REST совпали с верхом стакана 32 раза из 78; возраст поля `ts` тикеров: медиана 951 мс.
+
+### Приватная часть [док, проверить пробной сделкой]
+
+| Эндпоинт | Что делаем |
+|---|---|
+| `GET /api/v2/spot/account/info` | `authorities` (коды вроде `trade`, `readonly`, `wtw`) и `ips`. Вывод считается включённым, только если в коде есть `withdraw` или код начинается на `wt`; иначе — «неизвестно», как у Gate |
+| `GET /api/v2/mix/account/account` | `posMode` `one_way_mode`/`hedge_mode` |
+| `GET /api/v2/mix/account/accounts` | `accountEquity`, `available`, `crossedMargin` + `isolatedMargin` |
+| `GET /api/v2/mix/position/all-position` | `holdSide` long/short, `total` в монетах, `openPriceAvg`, `markPrice`, `liquidationPrice`, `leverage`, `marginMode` |
+| `GET /api/v2/common/trade-rate` | `takerFeeRate`, `makerFeeRate` долями. Без ключа терминал считает тейкер 0,06% |
+| `POST /api/v2/mix/account/set-margin-mode`, `set-leverage` | сначала режим маржи, потом плечо |
+| `POST /api/v2/mix/order/place-order` | `orderType` `market`, `clientOid` — свой id, `reduceOnly` строкой `"YES"`/`"NO"` |
+| `GET /api/v2/mix/order/detail?clientOid=` | `state` `live`/`partially_filled`/`filled`/`canceled`, `baseVolume`, `priceAvg` |
+| `GET /api/v2/mix/order/fills?orderId=` | `fillList`: `tradeId`, `price`, `baseVolume`, `feeDetail[].totalFee` |
+| `GET /api/v2/mix/account/bill?businessType=contract_settle_fee` | фандинг, `amount` со знаком |
+
+---
+
+## KuCoin Futures (подключена 15.09.2026)
+
+**Библиотека:** в ccxt биржа называется `kucoinfutures`. **Ключ с парольной фразой** — как у Bitget. Количество везде в лотах, а не в монетах.
+
+### Публичная часть [проверено 15.09.2026]
+
+| Эндпоинт | Что берём |
+|---|---|
+| `GET /api/v1/contracts/active` | 677 бессрочных на USDT (`type` `FFWCSX`, `status` `Open`, суффикс `USDTM`, `XBT` = BTC). `multiplier` — монет символа в одном лоте (XBTUSDTM 0,001 BTC, 10000CATUSDTM — лот из 10 × 10 000 CAT), `lotSize` — шаг и минимум в лотах, `marketMaxOrderQty`; здесь же `markPrice`, `indexPrice`, `turnoverOf24h` (опрос раз в минуту) |
+| `GET /api/v1/allTickers` | `bestBidPrice`, `bestAskPrice` — радар KuCoin, опрос раз в секунду |
+| `GET /api/v1/timestamp` | пинг и часы |
+| `POST /api/v1/bullet-public` → `wss://…?token=…` | **адрес вебсокета выдаётся вместе с токеном на каждое соединение**; канал `/contractMarket/level2Depth50:{symbol}` — снимки 50 уровней, пинг раз в 15 с |
+
+Лучшие цены REST совпали с верхом стакана 29 раз из 65; возраст `ts` в `allTickers`: медиана 5,7 с (у тихих контрактов до минут) — поэтому свежесть ноги KuCoin решает стакан.
+
+### Приватная часть [док, проверить пробной сделкой]
+
+| Эндпоинт | Что делаем |
+|---|---|
+| `GET /api/v1/user/api-key` | `permission` строкой `"General,Futures,Withdrawal"`, `ipWhitelist` |
+| `GET /api/v2/position/getPositionMode` | `positionMode` `"0"` — one-way, `"1"` — хедж |
+| `GET /api/v1/account-overview?currency=USDT` | `accountEquity`, `availableBalance`, `positionMargin` + `orderMargin` |
+| `GET /api/v1/positions` | `currentQty` в лотах со знаком, `avgEntryPrice`, `markPrice`, `liquidationPrice`, `realLeverage`, `marginMode` |
+| `GET /api/v1/trade-fees?symbols=` | `takerFeeRate`, `makerFeeRate` долями. Без ключа терминал считает тейкер 0,06% |
+| `POST /api/v1/position/changeMarginMode`, `/api/v2/changeCrossUserLeverage` | кросс-плечо меняется только в кросс-режиме |
+| `POST /api/v1/orders` | `type` `market`, `size` в лотах, `clientOid`, `leverage`, `marginMode`, `reduceOnly` |
+| `GET /api/v1/orders/byClientOid?clientOid=` | `isActive`, `cancelExist`, `filledSize` (лоты), `filledValue`, `avgDealPrice` |
+| `GET /api/v1/fills?orderId=` | `items`: `tradeId`, `price`, `size` (лоты), `fee`, `tradeTime` **в наносекундах** |
+| `GET /api/v1/funding-history?symbol=` | `dataList`: `funding` со знаком, `timePoint` |
+
+---
+
+## Hyperliquid (подключён 15.09.2026)
+
+**Библиотека:** в ccxt биржа называется `hyperliquid`. Счёт в USDC, а не в USDT. **Ключи — как у Aster:** поле «кошелёк» — адрес основного кошелька, поле «ключ» — приватный ключ API-кошелька. Ключ основного кошелька терминал не принимает.
+
+### Публичная часть [проверено 15.09.2026]
+
+| Эндпоинт | Что берём |
+|---|---|
+| `POST /info {"type": "metaAndAssetCtxs"}` | 178 монет: `universe` (`name`, `szDecimals` — шаг размера, `isDelisted`) и контексты по порядку — `impactPxs` (цены на «импакт»-размере, они же лучшие), `markPx`, `oraclePx` (индекс), `dayNtlVlm`. Минимальный ордер — $10, тика цены нет (не более 5 значащих цифр). `kPEPE` — лот из 1000 PEPE. Опрос раз в 2 с (вес 20 из 1200 в минуту) — это радар Hyperliquid |
+| `wss://api.hyperliquid.xyz/ws`, канал `l2Book` с `"fast": true` | обычный `l2Book` присылал стакан раз в 5,4 с, с `fast` — каждые ~0,5 с (медиана 540 мс). До 100 монет на соединение, пинг раз в 30 с. Поэтому стакан Hyperliquid считается живым до 2 с |
+
+Импакт-цены совпали с верхом стакана 12 раз из 78, а поток `bbo` — 255 раз из 1224: лучшие цены Hyperliquid **не** подтверждают тихий стакан, поэтому свежесть ноги здесь решает только возраст стакана.
+
+### Приватная часть [док, проверить пробной сделкой]
+
+| Эндпоинт | Что делаем |
+|---|---|
+| `POST /info {"type": "extraAgents"}` | подтверждает, что API-кошелёк одобрен основным. Если введён ключ основного кошелька — «вывод включён», ключ не принят |
+| `POST /info {"type": "clearinghouseState"}` | `marginSummary.accountValue`, `totalMarginUsed`, `withdrawable`; `assetPositions[].position`: `szi` со знаком, `entryPx`, `positionValue`, `liquidationPx`, `leverage` |
+| `POST /info {"type": "userFees"}` | текущая тейкерская ставка. Без ключа терминал считает тейкер 0,045% |
+| `POST /info {"type": "userFunding"}` | `delta.usdc` за каждый часовой расчёт |
+| `POST /info {"type": "userFillsByTime"}` | `px`, `sz`, `fee`, `tid`, `oid`, `crossed` (тейкер) |
+| `POST /exchange` (подпись API-кошельком) | плечо и рыночный ордер: лимитный IOC от лучшей цены стакана с допуском 2%, `cloid` — 128-битный id из своего id заказа. Ответ: `filled` (`totalSz`, `avgPx`, `oid`), `resting` или `error` |
+| `POST /info {"type": "orderStatus", "oid": cloid}` | `unknownOid` — ордера нет |
+
+Режим позиций на Hyperliquid всегда one-way.
+
+---
+
 ## Остальные биржи
 
 Публичные эндпоинты тикеров, которые работали в парсере [прод]. Для терминала у каждой биржи дополнительно нужны bid/ask, стакан и приватная часть.
 
 | Биржа | id в ccxt | Тикеры (все символы) | Цена в парсере | Объём 24ч в парсере | Заметки |
 |---|---|---|---|---|---|
-| Bybit | `bybit` | `GET https://api.bybit.com/v5/market/tickers?category=linear` | `lastPrice` | `turnover24h` | |
 | OKX | `okx` | `GET https://www.okx.com/api/v5/market/tickers?instType=SWAP` | `last` | `volCcy24h` | у SWAP `volCcy24h`, похоже, в базовой монете, а не в $ — парсер считал его долларами [проверить]. Торгуется контрактами |
-| Bitget | `bitget` | `GET https://api.bitget.com/api/v2/mix/market/tickers?productType=USDT-FUTURES` | `lastPr` | `quoteVolume` | |
 | Phemex | `phemex` | `GET https://api.phemex.com/md/v3/ticker/24hr/all?type=Perpetual` | `lastRp` | `turnoverRp` (в парсере делится на 1e8) | масштаб поля [проверить] |
-| Hyperliquid | `hyperliquid` | `POST https://api.hyperliquid.xyz/info` `{"type":"metaAndAssetCtxs"}` | `midPx` | `dayNtlVlm` | префикс `k` = ×1000. Торговля через API-кошелёк без права вывода, а не API-ключ |
-| KuCoin Futures | `kucoinfutures` | (в парсере только фандинг) `GET https://api-futures.kucoin.com/api/v1/contracts/active` | — | — | `XBT` = BTC, суффикс `USDTM` |

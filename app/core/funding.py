@@ -66,6 +66,16 @@ class PairFunding:
     horizon_pct: Decimal
     next_ms: int | None
     next_pct: Decimal | None
+    changes_ms: int | None = None  # until this moment the same rates give the same result; None — never
+
+
+def _changes_ms(rate: FundingRate, now_ms: int, horizon_ms: int) -> int | None:
+    """When the settlements inside (now, now + horizon] next change: the first one passes, or the next one comes in."""
+    following = next_settlement_ms(rate, now_ms)
+    if following is None or rate.interval_ms <= 0:
+        return None
+    entering = next_settlement_ms(rate, now_ms + horizon_ms)
+    return following if entering is None else min(following, entering - horizon_ms)
 
 
 def pair_funding(long: FundingRate | None, short: FundingRate | None, now_ms: int, horizon_hours: Decimal) -> PairFunding | None:
@@ -83,4 +93,5 @@ def pair_funding(long: FundingRate | None, short: FundingRate | None, now_ms: in
         horizon_pct=horizon,
         next_ms=next_ms,
         next_pct=next_pct,
+        changes_ms=min((moment for moment in (_changes_ms(long, now_ms, horizon_ms), _changes_ms(short, now_ms, horizon_ms)) if moment is not None), default=None),
     )

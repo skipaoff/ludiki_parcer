@@ -65,6 +65,7 @@ export interface ExchangeDetails {
   keys: KeysState;
   check: CheckResult | null;
   read_only?: boolean;
+  needs_passphrase?: boolean;
 }
 
 export interface InstrumentsSummary {
