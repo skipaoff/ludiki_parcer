@@ -14,10 +14,6 @@ import type { FeedRow, FeedView, Snapshot } from "./types";
 
 type SortKey = "total" | "profit";
 
-// The feed is read with the cursor: at the snapshot rate rows jump out from under it. Values older than this
-// are still fresh enough to act on, and a gap must live 45 s to enter the feed anyway.
-const REFRESH_MS = 10_000;
-
 interface Filters {
   roiMax: string;
   volumeMin: string;
@@ -338,22 +334,14 @@ export function FeedScreen({ token, snapshot }: { token: string; snapshot: Snaps
   const [filters, setFilters] = useState<Filters>(loadFilters);
   const [tradeMessage, setTradeMessage] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
-  // Snapshots arrive several times a second; the table takes one every REFRESH_MS so rows stay still under the cursor.
-  const [view, setView] = useState<{ feed: FeedView; at: number } | null>(null);
-  const takenAt = useRef(0);
+  // Numbers follow the socket; only the order of the rows is held while the cursor is over the table,
+  // so a line cannot slide out from under a click. Holding the numbers instead would age the prices,
+  // and a gap priced on stale prices is exactly the fake one this terminal must not show.
+  const [holding, setHolding] = useState(false);
+  const heldOrder = useRef<Record<string, string[]>>({});
 
-  useEffect(() => {
-    const incoming = snapshot?.feed;
-    if (!incoming) return;
-    const at = Date.now();
-    if (view === null || at - takenAt.current >= REFRESH_MS) {
-      takenAt.current = at;
-      setView({ feed: incoming, at });
-    }
-  }, [snapshot, view]);
-
-  const feed: FeedView | undefined = view?.feed;
-  const now = view?.at ?? Date.now();
+  const feed: FeedView | undefined = snapshot?.feed;
+  const now = Date.now();
 
   useEffect(() => {
     try {
@@ -413,12 +401,28 @@ export function FeedScreen({ token, snapshot }: { token: string; snapshot: Snaps
     };
   }, [feed, filters, minRoi]);
 
+  // Remember the order the screen is showing, but only while the cursor is away from it.
+  useEffect(() => {
+    if (holding) return;
+    heldOrder.current = {
+      feed: feedGroups.map((group) => group.token),
+      radar: radarGroups.map((group) => group.token),
+    };
+  });
+
+  const inHeldOrder = (groups: Group[], scope: string): Group[] => {
+    if (!holding) return groups;
+    const rank = new Map((heldOrder.current[scope] ?? []).map((tokenName, index) => [tokenName, index]));
+    // A coin that appeared while the cursor is here goes to the end rather than pushing the others around.
+    return [...groups].sort((a, b) => (rank.get(a.token) ?? Infinity) - (rank.get(b.token) ?? Infinity));
+  };
+
   const exchanges = (snapshot?.exchanges ?? []).map((exchange) => exchange.name);
   const common = { expanded, toggle, token, horizonH, sizeUsd, now, onResult: setTradeMessage };
 
   return (
     <div className="gaps">
-      <section className="feed">
+      <section className="feed" onMouseEnter={() => setHolding(true)} onMouseLeave={() => setHolding(false)}>
         <div className="toolbar filters feed-filters">
           <label title="строки с профитом выше — почти всегда разные монеты под одним тикером">
             профит ≤ <input value={filters.roiMax} onChange={(event) => set("roiMax", event.target.value)} />%
@@ -473,7 +477,7 @@ export function FeedScreen({ token, snapshot }: { token: string; snapshot: Snaps
           </span>
         </div>
 
-        {feedGroups.length > 0 && <GapTable groups={feedGroups} scope="feed" {...common} />}
+        {feedGroups.length > 0 && <GapTable groups={inHeldOrder(feedGroups, "feed")} scope="feed" {...common} />}
         {feedGroups.length === 0 && (
           <p className="empty muted">
             {feed ? `Сейчас нет вилок выше порога дольше ${Math.round(enterAfterMs / 1000)} с.` : "Лента запускается…"}
@@ -493,7 +497,7 @@ export function FeedScreen({ token, snapshot }: { token: string; snapshot: Snaps
             <div className="toolbar section-title">
               <span>РАДАР · лучшие спреды сейчас, ниже порога ленты</span>
             </div>
-            <GapTable groups={radarGroups} scope="radar" {...common} />
+            <GapTable groups={inHeldOrder(radarGroups, "radar")} scope="radar" {...common} />
           </>
         )}
       </section>
