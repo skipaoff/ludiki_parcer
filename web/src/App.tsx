@@ -80,16 +80,40 @@ export function App({ token }: { token: string }) {
       {journalOpen && <JournalPanel events={live.events} onClose={() => setJournalOpen(false)} />}
 
       <footer className="journal-line" onClick={() => setJournalOpen((open) => !open)}>
-        <span className="muted">журнал:</span>{" "}
-        {lastEvent ? (
-          <span className={`level-${lastEvent.level}`}>
-            {clock(lastEvent.ts_ms)} {describe(lastEvent)}
-          </span>
-        ) : (
-          <span className="muted">событий пока нет</span>
-        )}
+        <span className="journal-last">
+          <span className="muted">журнал:</span>{" "}
+          {lastEvent ? (
+            <span className={`level-${lastEvent.level}`}>
+              {clock(lastEvent.ts_ms)} {describe(lastEvent)}
+            </span>
+          ) : (
+            <span className="muted">событий пока нет</span>
+          )}
+        </span>
+        <Heartbeat lastMessageMs={live.lastMessageMs} live={live.link === "live"} now={now} />
       </footer>
     </div>
+  );
+}
+
+function Heartbeat({ lastMessageMs, live, now }: { lastMessageMs: number; live: boolean; now: number }) {
+  // The journal stands still for hours when nothing happens, which reads as a frozen screen. This clock
+  // is the time of the last message from the terminal: while data flows it ticks, and it stops the instant it does not.
+  if (!lastMessageMs) {
+    return <span className="heartbeat muted">данные: ждём терминал</span>;
+  }
+  const silentFor = Math.max(0, Math.round((now - lastMessageMs) / 1000));
+  if (!live) {
+    return (
+      <span className="heartbeat level-warning blink">
+        данные: {clock(lastMessageMs)} · молчит {silentFor} с
+      </span>
+    );
+  }
+  return (
+    <span className="heartbeat muted" title="время последнего сообщения от терминала: идёт — данные живые">
+      данные: {clock(lastMessageMs)}
+    </span>
   );
 }
 

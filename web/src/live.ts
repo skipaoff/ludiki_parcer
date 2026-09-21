@@ -17,6 +17,8 @@ export interface Live {
   link: LinkState;
   snapshot: Snapshot | null;
   events: JournalEvent[];
+  /** When the last message arrived. Shown as a clock: it ticks while data flows and stops the moment it does not. */
+  lastMessageMs: number;
 }
 
 export function useLive(token: string, initialEvents: JournalEvent[]): Live {
@@ -88,7 +90,9 @@ export function useLive(token: string, initialEvents: JournalEvent[]): Live {
     };
   }, [token]);
 
-  return { link, snapshot, events };
+  // Read off the ref at render time: the screen re-renders on every snapshot and once a second besides,
+  // so the clock in the footer advances without a state update per message.
+  return { link, snapshot, events, lastMessageMs: lastMessageAt.current };
 }
 
 function mergeEvents(base: JournalEvent[], extra: JournalEvent[]): JournalEvent[] {

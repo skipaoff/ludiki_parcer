@@ -433,12 +433,24 @@ input:focus {
 }
 
 .journal-line {
+  display: flex;
+  align-items: baseline;
+  gap: 1rem;
   padding: 0.35rem 1rem;
   border-top: 1px solid var(--line);
   white-space: nowrap;
+  cursor: pointer;
+}
+
+/* The event text yields; the freshness clock at the right end is never cut off. */
+.journal-last {
   overflow: hidden;
   text-overflow: ellipsis;
-  cursor: pointer;
+}
+
+.heartbeat {
+  margin-left: auto;
+  flex: none;
 }
 
 .journal-panel {
