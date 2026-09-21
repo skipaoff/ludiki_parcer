@@ -1,4 +1,4 @@
-// VFP: The Gaps screen — one line per coin with its most interesting pair (long, short, profit on the size after book and fees, funding, expected result, interest), the coin's other pairs on click, the radar below the feed and the open-pairs column.
+﻿// VFP: The Gaps screen — one line per coin with its most interesting pair (long, short, profit on the size after book and fees, funding, expected result, interest), the coin's other pairs on click, the radar below the feed and the open-pairs column.
 // Changes when: feed columns, grouping, row states, filters or the radar presentation change (PLAN.md, section 3.1).
 // Anti-goal:
 // 1. Recomputing trading numbers in the browser — the terminal computes; the screen filters, groups and sorts.
@@ -78,6 +78,28 @@ function groupByToken(rows: FeedRow[], sort: SortKey, headCandidates: (row: Feed
   return groups.sort((x, y) => rank(y.head, sort) - rank(x.head, sort));
 }
 
+/** null: the field is untouched and shows what the terminal holds. A string, empty included, is the typed text. */
+type Draft = string | null;
+
+function DraftInput({
+  value,
+  current,
+  onChange,
+}: {
+  value: Draft;
+  current: string | undefined;
+  onChange: (next: Draft) => void;
+}) {
+  return (
+    <input
+      value={value ?? current ?? ""}
+      inputMode="decimal"
+      onChange={(event) => onChange(event.target.value)}
+      onFocus={(event) => event.target.select()}
+    />
+  );
+}
+
 function SettingsForm({
   token,
   sizeUsd,
@@ -91,24 +113,34 @@ function SettingsForm({
   enterAfterMs?: number;
   horizonH?: string;
 }) {
-  const [size, setSize] = useState("");
-  const [threshold, setThreshold] = useState("");
-  const [lifetime, setLifetime] = useState("");
-  const [horizon, setHorizon] = useState("");
+  // null means "not edited", so the terminal's own value shows through. An empty string is a real edit:
+  // with "" standing for both, clearing a field snapped it straight back and the last digit could not be deleted.
+  const [size, setSize] = useState<Draft>(null);
+  const [threshold, setThreshold] = useState<Draft>(null);
+  const [lifetime, setLifetime] = useState<Draft>(null);
+  const [horizon, setHorizon] = useState<Draft>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const lifetimeSeconds = enterAfterMs === undefined ? "" : String(enterAfterMs / 1000);
 
-  const changed = (value: string, current: string | undefined) => value !== "" && value !== current;
+  const changed = (draft: Draft, current: string | undefined) => draft !== null && draft.trim() !== "" && draft !== current;
   const dirty = changed(size, sizeUsd) || changed(threshold, minRoiPct) || changed(lifetime, lifetimeSeconds) || changed(horizon, horizonH);
+
+  const forget = () => {
+    setSize(null);
+    setThreshold(null);
+    setLifetime(null);
+    setHorizon(null);
+    setMessage(null);
+  };
 
   const apply = async () => {
     const body: Record<string, string> = {};
-    if (changed(size, sizeUsd)) body.size_usd = size;
-    if (changed(threshold, minRoiPct)) body.min_roi_pct = threshold;
-    if (changed(horizon, horizonH)) body.funding_horizon_h = horizon.replace(",", ".");
+    if (changed(size, sizeUsd)) body.size_usd = (size as string).trim();
+    if (changed(threshold, minRoiPct)) body.min_roi_pct = (threshold as string).trim();
+    if (changed(horizon, horizonH)) body.funding_horizon_h = (horizon as string).trim().replace(",", ".");
     if (changed(lifetime, lifetimeSeconds)) {
-      const seconds = Number(lifetime.replace(",", "."));
+      const seconds = Number((lifetime as string).trim().replace(",", "."));
       if (!Number.isFinite(seconds) || seconds < 0) {
         setMessage("мин. жизнь — число секунд");
         return;
@@ -119,10 +151,7 @@ function SettingsForm({
     setMessage(null);
     try {
       await apiSend("PUT", "/api/feed/settings", token, body);
-      setSize("");
-      setThreshold("");
-      setLifetime("");
-      setHorizon("");
+      forget();
     } catch (reason) {
       setMessage((reason as Error).message);
     } finally {
@@ -137,15 +166,23 @@ function SettingsForm({
         event.preventDefault();
         void apply();
       }}
+      onKeyDown={(event) => {
+        if (event.key === "Escape") forget();
+      }}
     >
-      Размер $<input value={size === "" ? sizeUsd ?? "" : size} onChange={(event) => setSize(event.target.value)} /> на ногу · порог
-      ленты <input value={threshold === "" ? minRoiPct ?? "" : threshold} onChange={(event) => setThreshold(event.target.value)} />% ·
-      живёт ≥ <input value={lifetime === "" ? lifetimeSeconds : lifetime} onChange={(event) => setLifetime(event.target.value)} />с ·
-      фандинг за <input value={horizon === "" ? horizonH ?? "" : horizon} onChange={(event) => setHorizon(event.target.value)} />ч{" "}
+      Размер $<DraftInput value={size} current={sizeUsd} onChange={setSize} /> на ногу · порог ленты{" "}
+      <DraftInput value={threshold} current={minRoiPct} onChange={setThreshold} />% · живёт ≥{" "}
+      <DraftInput value={lifetime} current={lifetimeSeconds} onChange={setLifetime} />с · фандинг за{" "}
+      <DraftInput value={horizon} current={horizonH} onChange={setHorizon} />ч{" "}
       {dirty && (
-        <button className="action" type="submit" disabled={busy}>
-          [ПРИМЕНИТЬ]
-        </button>
+        <>
+          <button className="action" type="submit" disabled={busy}>
+            [ПРИМЕНИТЬ]
+          </button>{" "}
+          <button className="action" type="button" onClick={forget} title="вернуть значения терминала (Esc)">
+            [ОТМЕНА]
+          </button>
+        </>
       )}
       {message && <span className="level-warning"> {message}</span>}
     </form>
@@ -418,6 +455,10 @@ export function FeedScreen({ token, snapshot }: { token: string; snapshot: Snaps
   };
 
   const exchanges = (snapshot?.exchanges ?? []).map((exchange) => exchange.name);
+  // Sorting is a view choice, not a filter: resetting the filters leaves it alone.
+  const touched = (Object.keys(DEFAULT_FILTERS) as (keyof Filters)[]).some(
+    (key) => key !== "sort" && filters[key] !== DEFAULT_FILTERS[key],
+  );
   const common = { expanded, toggle, token, horizonH, sizeUsd, now, onResult: setTradeMessage };
 
   return (
@@ -425,13 +466,35 @@ export function FeedScreen({ token, snapshot }: { token: string; snapshot: Snaps
       <section className="feed" onMouseEnter={() => setHolding(true)} onMouseLeave={() => setHolding(false)}>
         <div className="toolbar filters feed-filters">
           <label title="строки с профитом выше — почти всегда разные монеты под одним тикером">
-            профит ≤ <input value={filters.roiMax} onChange={(event) => set("roiMax", event.target.value)} />%
+            профит ≤{" "}
+            <input
+              value={filters.roiMax}
+              inputMode="decimal"
+              onFocus={(event) => event.target.select()}
+              onKeyDown={(event) => event.key === "Escape" && set("roiMax", "")}
+              onChange={(event) => set("roiMax", event.target.value)}
+            />
+            %
           </label>
           <label>
-            объём 24ч ≥ $ <input value={filters.volumeMin} onChange={(event) => set("volumeMin", event.target.value)} />
+            объём 24ч ≥ ${" "}
+            <input
+              value={filters.volumeMin}
+              inputMode="decimal"
+              onFocus={(event) => event.target.select()}
+              onKeyDown={(event) => event.key === "Escape" && set("volumeMin", "")}
+              onChange={(event) => set("volumeMin", event.target.value)}
+            />
           </label>
           <label title="сколько долларов на ногу выдерживают стаканы, пока профит выше порога">
-            глубина ≥ $ <input value={filters.capacityMin} onChange={(event) => set("capacityMin", event.target.value)} />
+            глубина ≥ ${" "}
+            <input
+              value={filters.capacityMin}
+              inputMode="decimal"
+              onFocus={(event) => event.target.select()}
+              onKeyDown={(event) => event.key === "Escape" && set("capacityMin", "")}
+              onChange={(event) => set("capacityMin", event.target.value)}
+            />
           </label>
           <label className="check-label">
             <input type="checkbox" checked={filters.showSuspicious} onChange={(event) => set("showSuspicious", event.target.checked)} />{" "}
@@ -457,7 +520,17 @@ export function FeedScreen({ token, snapshot }: { token: string; snapshot: Snaps
               </option>
             ))}
           </select>
-          <input placeholder="монета" value={filters.search} onChange={(event) => set("search", event.target.value)} />
+          <input
+            placeholder="монета"
+            value={filters.search}
+            onKeyDown={(event) => event.key === "Escape" && set("search", "")}
+            onChange={(event) => set("search", event.target.value)}
+          />
+          {touched && (
+            <button className="action" type="button" onClick={() => setFilters({ ...DEFAULT_FILTERS, sort: filters.sort })}>
+              [СБРОС ФИЛЬТРОВ]
+            </button>
+          )}
         </div>
         <div className="toolbar muted">
           <SettingsForm
