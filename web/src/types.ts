@@ -131,12 +131,13 @@ export interface FeedRow {
   open_blocks?: string[];
   profit_usd: string | null;
   funding: {
-    long: { rate_pct: string; interval_h: string } | null;
-    short: { rate_pct: string; interval_h: string } | null;
+    long: { rate_pct: string; interval_h: string; next_ms: number | null } | null;
+    short: { rate_pct: string; interval_h: string; next_ms: number | null } | null;
     hourly_pct: string | null;
     horizon_pct: string | null;
     horizon_usd: string | null;
     next_ms: number | null;
+    next_pct: string | null;
     next_usd: string | null;
   } | null;
   funding_known: boolean;

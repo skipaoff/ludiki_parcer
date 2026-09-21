@@ -269,9 +269,12 @@ def test_rows_carry_profit_funding_result_and_interest():
 
     row = engine.view()["rows"][0]
     assert Decimal(row["profit_usd"]) == Decimal("10")  # 1.0 % of $1000
-    assert row["funding"]["long"] == {"rate_pct": "0.01", "interval_h": "8"}
+    # next_ms per leg: the feed shows both settlement timers, because the legs rarely settle together.
+    assert row["funding"]["long"] == {"rate_pct": "0.01", "interval_h": "8", "next_ms": rates[("mexc", "SOL_USDT")].next_ms}
+    assert row["funding"]["short"]["next_ms"] == rates[("binance", "SOLUSDT")].next_ms
     assert Decimal(row["funding"]["horizon_pct"]) == Decimal("-0.01") - Decimal("0.04")
     assert Decimal(row["funding"]["horizon_usd"]) == Decimal("-0.5")
+    assert Decimal(row["funding"]["next_pct"]) == Decimal("-0.01")
     assert Decimal(row["funding"]["next_usd"]) == Decimal("-0.1")
     assert Decimal(row["total_pct"]) == Decimal("0.95") and Decimal(row["total_usd"]) == Decimal("9.5")
     assert row["funding_known"] is True

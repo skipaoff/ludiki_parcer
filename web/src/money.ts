@@ -39,6 +39,13 @@ export function price(value: string | null | undefined): string {
 export interface RateView {
   rate_pct: string;
   interval_h: string;
+  /** Optional: the open-pairs column formats rates that carry no settlement time. */
+  next_ms?: number | null;
+}
+
+/** When each leg settles funding next, long first: "4ч 05м/12м". The legs rarely settle together. */
+export function settlementTimers(long: RateView | null | undefined, short: RateView | null | undefined, nowMs: number): string {
+  return `${until(long?.next_ms, nowMs)}/${until(short?.next_ms, nowMs)}`;
 }
 
 /** A leg's funding as the exchange states it: percent per settlement and the settlement interval, "+0.005%/4ч", "−0.0069%/1ч". */

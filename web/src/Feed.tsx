@@ -5,14 +5,18 @@
 // 2. Numbers that flicker without meaning — book ages and per-second timers stay off the table.
 // 3. Hiding why a line cannot be opened — every status has its explanation on hover.
 
-import { Fragment, useEffect, useMemo, useState } from "react";
-import { coarseDuration, rateText, signClass, signedPct, signedUsd, until } from "./money";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
+import { rateText, settlementTimers, signClass, signedPct, signedUsd } from "./money";
 import { PortfolioColumn } from "./Portfolio";
 import { apiSend } from "./session";
 import { explainFailure, reasonText, tradingAction } from "./trading";
 import type { FeedRow, FeedView, Snapshot } from "./types";
 
-type SortKey = "score" | "total" | "profit";
+type SortKey = "total" | "profit";
+
+// The feed is read with the cursor: at the snapshot rate rows jump out from under it. Values older than this
+// are still fresh enough to act on, and a gap must live 45 s to enter the feed anyway.
+const REFRESH_MS = 10_000;
 
 interface Filters {
   roiMax: string;
@@ -35,70 +39,17 @@ const DEFAULT_FILTERS: Filters = {
   longExchange: "",
   shortExchange: "",
   search: "",
-  sort: "score",
+  sort: "total",
 };
 
 const READ_ONLY = new Set(["variational"]);
 const SOON_MS = 60 * 60 * 1000;
 
-interface Status {
-  text: string;
-  hint: string;
-}
-
-const BLOCK_STATUS: Record<string, Status> = {
-  stale: {
-    text: "данные устарели",
-    hint: "Стакан одной из бирж давно не обновлялся и не подтверждается её лучшими ценами — профит сейчас не посчитать честно.",
-  },
-  no_book: {
-    text: "нет стакана",
-    hint: "Пара видна только по лучшим ценам: стакан подключается, когда спред близок к порогу. Профит на размер появится после подключения.",
-  },
-  book_too_thin: { text: "мало глубины", hint: "В стаканах не хватает объёма, чтобы набрать весь размер позиции." },
-  suspicious: {
-    text: "подозрительная",
-    hint: "Цены или индексы бирж слишком разные — возможно, под одним тикером разные монеты. Проверьте вручную на экране «Пары».",
-  },
-  blacklisted: { text: "чёрный список", hint: "Пара отмечена вручную как нерабочая на экране «Пары»." },
-  size_below_common_step: { text: "размер мал", hint: "Размер позиции меньше шага количества одной из бирж." },
-  non_positive_input: { text: "нет цены", hint: "Биржа не отдала цену." },
-};
-
-const SCOPED_STATUS: Record<string, Status> = {
-  below_min_qty: { text: "меньше мин. ордера", hint: "Размер позиции меньше минимального количества ордера на бирже" },
-  below_min_notional: { text: "меньше мин. суммы", hint: "Размер позиции меньше минимальной суммы ордера на бирже" },
-  above_max_market_qty: { text: "больше макс. ордера", hint: "Размер больше максимума одного рыночного ордера на бирже" },
-};
-
-function statusOf(row: FeedRow, enterAfterMs: number): Status {
-  if (row.block) {
-    const [code, exchange] = row.block.split(":");
-    const scoped = SCOPED_STATUS[code];
-    if (scoped) return { text: `${scoped.text} ${exchange?.toUpperCase() ?? ""}`, hint: `${scoped.hint} ${exchange?.toUpperCase() ?? ""}.` };
-    return BLOCK_STATUS[row.block] ?? { text: row.block, hint: row.block };
-  }
-  const needed = Math.round(enterAfterMs / 1000);
-  if (row.phase === "in_feed") {
-    return { text: `в ленте ${coarseDuration(row.lifetime_ms)}`, hint: `Профит выше порога дольше ${needed} с. Время — сколько вилка уже держится.` };
-  }
-  if (row.phase === "candidate") {
-    const lived = Math.min(needed, Math.floor((row.lifetime_ms ?? 0) / 1000));
-    return {
-      text: `ждёт ${lived} из ${needed} с`,
-      hint: `Профит уже выше порога, но вилка ещё не прожила ${needed} с. Если продержится — попадёт в ленту.`,
-    };
-  }
-  if (row.phase === "tracking") {
-    return { text: "ушла из ленты", hint: "Была в ленте и опустилась ниже порога; терминал следит за ней, пока цены не сойдутся." };
-  }
-  return { text: "ниже порога", hint: "Спред есть, но профит после стакана и комиссий ниже порога ленты." };
-}
-
 function loadFilters(): Filters {
   try {
     const stored = { ...DEFAULT_FILTERS, ...JSON.parse(localStorage.getItem("ludik.feed.filters") ?? "{}") };
-    if (!["score", "total", "profit"].includes(stored.sort)) stored.sort = "score";
+    // "score" was the interest column, which is gone; a stored one falls back to the expected result.
+    if (!["total", "profit"].includes(stored.sort)) stored.sort = "total";
     return stored;
   } catch {
     return DEFAULT_FILTERS;
@@ -106,12 +57,8 @@ function loadFilters(): Filters {
 }
 
 function rank(row: FeedRow, sort: SortKey): number {
-  const total = row.total_pct === null ? -1e9 : Number(row.total_pct);
   if (sort === "profit") return row.roi_net_pct === null ? -1e9 : Number(row.roi_net_pct);
-  if (sort === "total") return total;
-  // Interest first; equal interest falls back to the expected result. A gap without interest yet (stale data) counts as 0,
-  // so a stale +1% still ranks above a live loss.
-  return (row.score ?? 0) * 1e6 + total;
+  return row.total_pct === null ? -1e9 : Number(row.total_pct);
 }
 
 interface Group {
@@ -232,55 +179,35 @@ function OpenButton({ token, row, onResult }: { token: string; row: FeedRow; onR
   );
 }
 
-function Leg({ leg, rate }: { leg: FeedRow["long"]; rate: { rate_pct: string; interval_h: string } | null | undefined }) {
+function Leg({ leg }: { leg: FeedRow["long"] }) {
   if (!leg) return <>—</>;
+  if (!leg.url) return <>{leg.exchange.toUpperCase()}</>;
   return (
-    <>
-      {leg.url ? (
-        <a href={leg.url} target="_blank" rel="noreferrer">
-          {leg.exchange.toUpperCase()}
-        </a>
-      ) : (
-        leg.exchange.toUpperCase()
-      )}{" "}
-      <span className="muted" title="ставка фандинга этой биржи за один расчёт и интервал расчётов">
-        {rateText(rate)}
-      </span>
-    </>
+    <a href={leg.url} target="_blank" rel="noreferrer">
+      {leg.exchange.toUpperCase()}
+    </a>
   );
 }
 
 function FundingCell({ row, horizonH, now }: { row: FeedRow; horizonH: string; now: number }) {
   const funding = row.funding;
-  if (!funding || funding.horizon_usd === null) {
+  if (!funding || funding.horizon_pct === null) {
     return <span className="muted" title="ставка фандинга одной из бирж не получена">?</span>;
   }
-  const soon = funding.next_ms !== null && funding.next_usd !== null && funding.next_ms - now < SOON_MS;
+  const soon = funding.next_ms !== null && funding.next_pct !== null && funding.next_ms - now < SOON_MS;
   const hint = [
-    `За ${horizonH} ч пара ${Number(funding.horizon_usd) >= 0 ? "получит" : "заплатит"} ${signedUsd(funding.horizon_usd).replace("−", "")} (${signedPct(funding.horizon_pct, 3)} от размера).`,
-    funding.next_ms !== null && funding.next_usd !== null ? `Ближайший расчёт через ${until(funding.next_ms, now)}: ${signedUsd(funding.next_usd)}.` : null,
+    `За ${horizonH} ч пара ${Number(funding.horizon_pct) >= 0 ? "получит" : "заплатит"} ${signedPct(funding.horizon_pct, 3).replace("−", "")} от размера.`,
+    `Лонг ${rateText(funding.long)}, шорт ${rateText(funding.short)}.`,
+    `Расчёт: ${settlementTimers(funding.long, funding.short, now)} (лонг/шорт).`,
     "Лонг платит при положительной ставке своей биржи, шорт получает; при отрицательной — наоборот.",
-  ]
-    .filter(Boolean)
-    .join(" ");
+  ].join(" ");
   return (
     <span title={hint}>
-      <span className={signClass(funding.horizon_usd)}>{signedUsd(funding.horizon_usd)}</span>
-      <span className="muted">/{horizonH}ч</span>
-      {soon && Number(funding.next_usd) <= -0.005 && (
-        <span className="loss">
-          {" "}
-          · {signedUsd(funding.next_usd)} через {until(funding.next_ms, now)}
-        </span>
-      )}
+      <span className={signClass(funding.horizon_pct)}>{signedPct(funding.horizon_pct)}</span>
+      <span className="muted"> {settlementTimers(funding.long, funding.short, now)}</span>
+      {soon && Number(funding.next_pct) <= -0.005 && <span className="loss"> {signedPct(funding.next_pct)}</span>}
     </span>
   );
-}
-
-function scoreHint(row: FeedRow): string {
-  if (row.score === null || !row.score_parts) return "интерес считается, когда есть стакан на обеих биржах";
-  const parts = row.score_parts;
-  return `интерес ${row.score} из 100: итог ${parts.result}/50 · глубина ${parts.depth}/20 · устойчивость ${parts.stability}/15 · ликвидность ${parts.liquidity}/15`;
 }
 
 function GapLine({
@@ -290,7 +217,6 @@ function GapLine({
   nested,
   onToggle,
   token,
-  enterAfterMs,
   horizonH,
   sizeUsd,
   now,
@@ -302,14 +228,12 @@ function GapLine({
   nested: boolean;
   onToggle: () => void;
   token: string;
-  enterAfterMs: number;
   horizonH: string;
   sizeUsd: string;
   now: number;
   onResult: (message: string | null) => void;
 }) {
-  const status = statusOf(row, enterAfterMs);
-  const dim = row.block !== null || row.total_pct === null;
+  const dim = row.total_pct === null;
   return (
     <tr className={dim ? "muted" : ""}>
       <td className="left strong">
@@ -326,10 +250,10 @@ function GapLine({
         {row.suspicious ? " ?" : ""}
       </td>
       <td className="left">
-        <Leg leg={row.long} rate={row.funding?.long} />
+        <Leg leg={row.long} />
       </td>
       <td className="left">
-        <Leg leg={row.short} rate={row.funding?.short} />
+        <Leg leg={row.short} />
       </td>
       <td
         className="strong"
@@ -345,14 +269,7 @@ function GapLine({
         className="strong"
         title={row.funding_known ? `Итог = профит + фандинг за ${horizonH} ч.` : "Итог = профит; фандинг не получен и не учтён."}
       >
-        <span className={signClass(row.total_usd)}>{row.total_usd === null ? "—" : signedUsd(row.total_usd)}</span>
-        {row.total_pct !== null && <span className="muted"> {signedPct(row.total_pct)}</span>}
-      </td>
-      <td className="strong" title={scoreHint(row)}>
-        {row.score ?? "—"}
-      </td>
-      <td className="left" title={status.hint}>
-        {status.text}
+        <span className={signClass(row.total_pct)}>{signedPct(row.total_pct)}</span>
       </td>
       <td>
         <OpenButton token={token} row={row} onResult={onResult} />
@@ -367,7 +284,6 @@ function GapTable({
   toggle,
   scope,
   token,
-  enterAfterMs,
   horizonH,
   sizeUsd,
   now,
@@ -378,13 +294,12 @@ function GapTable({
   toggle: (key: string) => void;
   scope: string;
   token: string;
-  enterAfterMs: number;
   horizonH: string;
   sizeUsd: string;
   now: number;
   onResult: (message: string | null) => void;
 }) {
-  const common = { token, enterAfterMs, horizonH, sizeUsd, now, onResult };
+  const common = { token, horizonH, sizeUsd, now, onResult };
   return (
     <table className="grid feed-table">
       <thead>
@@ -393,10 +308,10 @@ function GapTable({
           <th className="left">ЛОНГ</th>
           <th className="left">ШОРТ</th>
           <th title={`прибыль на $${sizeUsd} после стакана и комиссий, если цены сойдутся`}>ПРОФИТ ${sizeUsd}</th>
-          <th title={`что пара получит (+) или заплатит (−) по фандингу за ${horizonH} ч`}>ФАНДИНГ</th>
+          <th title={`что пара получит (+) или заплатит (−) по фандингу за ${horizonH} ч, и время до расчёта: лонг/шорт`}>
+            ФАНДИНГ
+          </th>
           <th title="профит + фандинг">ИТОГ</th>
-          <th title="0–100: итог, глубина стаканов, устойчивость вилки, ликвидность монеты">ИНТЕРЕС</th>
-          <th className="left">СТАТУС</th>
           <th />
         </tr>
       </thead>
@@ -423,8 +338,22 @@ export function FeedScreen({ token, snapshot }: { token: string; snapshot: Snaps
   const [filters, setFilters] = useState<Filters>(loadFilters);
   const [tradeMessage, setTradeMessage] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
-  const feed: FeedView | undefined = snapshot?.feed;
-  const now = Date.now();
+  // Snapshots arrive several times a second; the table takes one every REFRESH_MS so rows stay still under the cursor.
+  const [view, setView] = useState<{ feed: FeedView; at: number } | null>(null);
+  const takenAt = useRef(0);
+
+  useEffect(() => {
+    const incoming = snapshot?.feed;
+    if (!incoming) return;
+    const at = Date.now();
+    if (view === null || at - takenAt.current >= REFRESH_MS) {
+      takenAt.current = at;
+      setView({ feed: incoming, at });
+    }
+  }, [snapshot, view]);
+
+  const feed: FeedView | undefined = view?.feed;
+  const now = view?.at ?? Date.now();
 
   useEffect(() => {
     try {
@@ -456,6 +385,11 @@ export function FeedScreen({ token, snapshot }: { token: string; snapshot: Snaps
     const capacityMin = number(filters.capacityMin, 0);
     const query = filters.search.trim().toUpperCase();
     const keep = (row: FeedRow) => {
+      // A blocked pair cannot be opened and its profit cannot be trusted — stale book, too thin, suspicious,
+      // blacklisted, below the exchange minimums. Such a row is not shown at all.
+      // "no_book" is not a fault: that is every radar row until its spread comes close enough to the threshold
+      // for the terminal to subscribe to the books. Dropping it would empty the radar.
+      if (row.block !== null && row.block !== "no_book") return false;
       // The minimum is the terminal's feed threshold; the maximum filters out fake gaps of different assets.
       if (Number(row.roi_net_pct ?? -Infinity) > roiMax) return false;
       if (row.volume24h_weak_usd !== null && Number(row.volume24h_weak_usd) < volumeMin) return false;
@@ -480,7 +414,7 @@ export function FeedScreen({ token, snapshot }: { token: string; snapshot: Snaps
   }, [feed, filters, minRoi]);
 
   const exchanges = (snapshot?.exchanges ?? []).map((exchange) => exchange.name);
-  const common = { expanded, toggle, token, enterAfterMs, horizonH, sizeUsd, now, onResult: setTradeMessage };
+  const common = { expanded, toggle, token, horizonH, sizeUsd, now, onResult: setTradeMessage };
 
   return (
     <div className="gaps">
@@ -531,9 +465,9 @@ export function FeedScreen({ token, snapshot }: { token: string; snapshot: Snaps
           />
           <span className="sort-buttons">
             сорт:
-            {(["score", "total", "profit"] as SortKey[]).map((value) => (
+            {(["total", "profit"] as SortKey[]).map((value) => (
               <button key={value} className={filters.sort === value ? "tab active" : "tab"} onClick={() => set("sort", value)}>
-                {value === "score" ? "интерес" : value === "total" ? "итог" : "профит"}
+                {value === "total" ? "итог" : "профит"}
               </button>
             ))}
           </span>

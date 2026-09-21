@@ -111,7 +111,8 @@ def _text(value: Decimal | None, digits: int = 8) -> str | None:
 def _rate_view(rate: FundingRate | None) -> dict[str, Any] | None:
     if rate is None:
         return None
-    return {"rate_pct": _text(rate.rate_pct, 4), "interval_h": _text(rate.interval_hours, 3)}
+    # next_ms is per exchange: the feed shows both settlement timers, because the legs rarely settle together.
+    return {"rate_pct": _text(rate.rate_pct, 4), "interval_h": _text(rate.interval_hours, 3), "next_ms": rate.next_ms}
 
 
 def _worth_watching(record: PairRecord) -> bool:
@@ -639,6 +640,7 @@ class PriceGapEngine:
             "horizon_pct": _text(funding.horizon_pct, 4) if funding else None,
             "horizon_usd": _text(funding.horizon_pct * size / 100, 4) if funding else None,
             "next_ms": funding.next_ms if funding else None,
+            "next_pct": _text(funding.next_pct, 4) if funding and funding.next_pct is not None else None,
             "next_usd": _text(funding.next_pct * size / 100, 4) if funding and funding.next_pct is not None else None,
         }
         self._funding_views[direction] = (funding.changes_ms if funding else None, self._settings, rate_long, rate_short, funding, view)
