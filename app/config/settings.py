@@ -160,6 +160,8 @@ class FeedSettings(_Section):
     resubscribe_after_ms: int = Field(default=5000, ge=1000)
     tick_ms: int = Field(default=200, ge=50)
     enter_after_ms: int = Field(default=45000, ge=0)
+    fast_enter_multiple: Decimal = Field(default=Decimal(4), ge=0)
+    fast_enter_after_ms: int = Field(default=5000, ge=0)
     exit_hysteresis_pct: Decimal = Field(default=Decimal("0.10"), ge=0)
     exit_after_ms: int = Field(default=2000, ge=0)
     default_taker_fee_binance_pct: Decimal = Field(default=Decimal("0.05"), ge=0)

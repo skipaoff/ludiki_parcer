@@ -37,13 +37,35 @@ class EpisodeRules:
     enter_after_ms — how long a gap must live before it is shown: dips below the exit level shorter than
     exit_after_ms do not reset that clock, a longer dip (or no measurement) does. 45 s by the owner's rule (14.09.2026):
     one-second lead-lag blips cannot be caught by hand.
+
+    The wait proves a gap can be clicked, not that it is real — index agreement, book depth and the volume of
+    the weaker leg do that. A gap far above the threshold is the one worth clicking and the one that converges
+    fastest, so holding it for the full 45 s mostly loses it: at fast_enter_multiple times the threshold the
+    wait drops to fast_enter_after_ms. Near the threshold the long wait stays, or the feed fills with blips.
     """
 
     min_roi_net_pct: Decimal
     enter_after_ms: int = 45_000
+    fast_enter_multiple: Decimal = Decimal(4)
+    fast_enter_after_ms: int = 5_000
     exit_hysteresis_pct: Decimal = Decimal("0.10")
     exit_after_ms: int = 2_000
     max_lifetime_ms: int = 24 * 3600 * 1000
+
+
+def wait_before_feed_ms(roi_net_pct: Decimal | None, rules: EpisodeRules) -> int:
+    """
+    How long this gap has to hold before the feed, given how far above the threshold it is.
+
+    Never longer than enter_after_ms and never shorter than fast_enter_after_ms, so a mis-set multiple
+    cannot turn the feed into the blip spam the wait exists to stop.
+    """
+    if roi_net_pct is None or rules.fast_enter_multiple <= 0:
+        return rules.enter_after_ms
+    fast_from = rules.min_roi_net_pct * rules.fast_enter_multiple
+    if rules.min_roi_net_pct > 0 and roi_net_pct >= fast_from:
+        return min(rules.enter_after_ms, rules.fast_enter_after_ms)
+    return rules.enter_after_ms
 
 
 @dataclass(frozen=True, slots=True)
@@ -137,7 +159,7 @@ def step(
                 return None, []
             return replace(state, below_since_ms=below_since), []
         state = replace(state, below_since_ms=None)
-        if is_above and sample.ts_ms - state.above_since_ms >= rules.enter_after_ms:
+        if is_above and sample.ts_ms - state.above_since_ms >= wait_before_feed_ms(sample.roi_net_pct, rules):
             entered = _track_peak(_enter_feed(state, sample), sample)
             return entered, [EpisodeEvent(EventKind.ENTERED_FEED, sample.ts_ms)]
         return state, []
@@ -160,7 +182,7 @@ def step(
     if not is_above:
         return replace(state, above_since_ms=None), []
     above_since = state.above_since_ms if state.above_since_ms is not None else sample.ts_ms
-    if sample.ts_ms - above_since >= rules.enter_after_ms:
+    if sample.ts_ms - above_since >= wait_before_feed_ms(sample.roi_net_pct, rules):
         return _enter_feed(state, sample), [EpisodeEvent(EventKind.ENTERED_FEED, sample.ts_ms)]
     return replace(state, above_since_ms=above_since), []
 

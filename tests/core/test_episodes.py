@@ -35,6 +35,44 @@ def test_gap_must_live_45_seconds_before_it_is_shown():
     assert state.detected_ms == 0 and state.first_entered_feed_ms == 45_000
 
 
+def test_a_gap_far_above_the_threshold_waits_only_the_short_time():
+    # 2.0 % is four times the 0.50 % threshold: such a gap converges fastest and is the one worth clicking.
+    state, events = run([(ms, "2.0", "2.5") for ms in range(0, 6_000, 1_000)], rules=RULES_45S)
+
+    assert state.phase is Phase.IN_FEED
+    assert kinds(events) == [EventKind.ENTERED_FEED]
+
+
+def test_just_under_the_fast_multiple_still_waits_the_full_time():
+    state, events = run([(ms, "1.9", "2.5") for ms in range(0, 6_000, 1_000)], rules=RULES_45S)
+
+    assert state.phase is Phase.CANDIDATE and events == []
+
+
+def test_a_growing_gap_enters_as_soon_as_it_is_far_enough_above():
+    """It has been above the threshold for 10 s already; reaching 2 % makes 5 s the bar it has to clear."""
+    grows = [(ms, "0.8", "1.2") for ms in range(0, 10_000, 1_000)] + [(10_000, "2.4", "2.8")]
+    state, events = run(grows, rules=RULES_45S)
+
+    assert state.phase is Phase.IN_FEED
+    assert kinds(events) == [EventKind.ENTERED_FEED]
+
+
+def test_the_fast_path_can_be_turned_off():
+    off = EpisodeRules(min_roi_net_pct=D("0.50"), fast_enter_multiple=D(0))
+    state, events = run([(ms, "5.0", "5.5") for ms in range(0, 6_000, 1_000)], rules=off)
+
+    assert state.phase is Phase.CANDIDATE and events == []
+
+
+def test_the_fast_path_never_delays_a_feed_that_is_already_faster():
+    # RULES enters after 300 ms; a huge gap must not be held back to the 5 s of the fast path.
+    state, events = run([(0, "9.0", "9.5"), (300, "9.0", "9.5")])
+
+    assert state.phase is Phase.IN_FEED
+    assert kinds(events) == [EventKind.ENTERED_FEED]
+
+
 def test_short_dip_does_not_reset_the_45_second_clock_but_a_long_one_does():
     dip = [(0, "0.9", "1.2"), (20_000, "0.9", "1.2"), (20_500, "0.2", "1.0"), (21_500, None, None), (22_000, "0.9", "1.2")]
     state, _ = run(dip, rules=RULES_45S)
