@@ -283,7 +283,11 @@ function GapLine({
     <tr className={dim ? "muted" : ""}>
       <td className="left strong">
         {nested ? (
-          <span className="muted">└</span>
+          // The branch glyph that used to stand here reads as a letter L in a monospace font; the ticker,
+          // greyed against the bold head above it, says the same thing and cannot be misread.
+          <span className="muted" title={`ещё одна пара по монете ${row.token}`}>
+            {row.token}
+          </span>
         ) : others > 0 ? (
           <button className="coin" onClick={onToggle} title={expanded ? "скрыть другие пары" : `ещё пар по монете: ${others}`}>
             {row.token} {expanded ? "▾" : "▸"}
