@@ -110,9 +110,33 @@ button:disabled {
 }
 
 .tab.active {
-  color: var(--fg);
+  color: var(--bg);
+  background: var(--fg);
+  padding: 0 0.45em;
   font-weight: 700;
   text-transform: uppercase;
+}
+
+/* A key word in a plain rectangle: no radius, no fill, no colour — the style allows none of the three. */
+.chip {
+  display: inline-block;
+  padding: 0 0.35em;
+  border: 1px solid var(--line);
+  white-space: nowrap;
+}
+
+a.chip {
+  text-decoration: none;
+}
+
+a.chip:hover {
+  border-color: var(--fg);
+}
+
+/* A mark on the word it belongs to: same rectangle, quieter, half a space away. */
+.chip-note {
+  margin-left: 0.35em;
+  font-size: 0.85em;
 }
 
 .indicators {

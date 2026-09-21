@@ -214,11 +214,23 @@ function OpenButton({ token, row, onResult }: { token: string; row: FeedRow; onR
 
 function Leg({ leg }: { leg: FeedRow["long"] }) {
   if (!leg) return <>—</>;
-  if (!leg.url) return <>{leg.exchange.toUpperCase()}</>;
+  const name = leg.exchange.toUpperCase();
+  const watchOnly = READ_ONLY.has(leg.exchange);
   return (
-    <a href={leg.url} target="_blank" rel="noreferrer">
-      {leg.exchange.toUpperCase()}
-    </a>
+    <>
+      {leg.url ? (
+        <a className="chip" href={leg.url} target="_blank" rel="noreferrer" title={`открыть ${name} в браузере`}>
+          {name}
+        </a>
+      ) : (
+        <span className="chip">{name}</span>
+      )}
+      {watchOnly && (
+        <span className="chip chip-note muted" title="торгового API у биржи нет: такую вилку можно только смотреть">
+          набл.
+        </span>
+      )}
+    </>
   );
 }
 
@@ -496,13 +508,20 @@ export function FeedScreen({ token, snapshot }: { token: string; snapshot: Snaps
               onChange={(event) => set("capacityMin", event.target.value)}
             />
           </label>
-          <label className="check-label">
+          <span className="muted">показывать:</span>
+          <label
+            className="check-label"
+            title="Индексы бирж расходятся больше чем на 1 % — вероятно, под одним тикером разные монеты или сломан множитель. Снимите галочку, чтобы убрать такие вилки из ленты."
+          >
             <input type="checkbox" checked={filters.showSuspicious} onChange={(event) => set("showSuspicious", event.target.checked)} />{" "}
-            подозрит.
+            подозрительные
           </label>
-          <label className="check-label" title="Variational: торгового API нет, вилки только для наблюдения">
+          <label
+            className="check-label"
+            title="Вилки, где хотя бы одна нога на бирже без торгового API (Variational). Их видно и считает, но кнопка «Открыть» для них не работает. Снимите галочку, чтобы убрать их из ленты."
+          >
             <input type="checkbox" checked={filters.showReadOnly} onChange={(event) => set("showReadOnly", event.target.checked)} />{" "}
-            только наблюдение
+            без торговли
           </label>
           <select value={filters.longExchange} onChange={(event) => set("longExchange", event.target.value)}>
             <option value="">лонг: все</option>
@@ -568,7 +587,9 @@ export function FeedScreen({ token, snapshot }: { token: string; snapshot: Snaps
         {radarGroups.length > 0 && (
           <>
             <div className="toolbar section-title">
-              <span>РАДАР · лучшие спреды сейчас, ниже порога ленты</span>
+              <span>
+                <span className="chip">РАДАР</span> <span className="muted">лучшие спреды сейчас, ниже порога ленты</span>
+              </span>
             </div>
             <GapTable groups={inHeldOrder(radarGroups, "radar")} scope="radar" {...common} />
           </>
