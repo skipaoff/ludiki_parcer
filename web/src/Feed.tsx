@@ -423,7 +423,7 @@ export function FeedScreen({ token, snapshot }: { token: string; snapshot: Snaps
   const sizeUsd = settings?.size_usd ?? "—";
   const enterAfterMs = settings?.enter_after_ms ?? 0;
 
-  const { feedGroups, radarGroups, hiddenRows } = useMemo(() => {
+  const { feedGroups, radarGroups, manualGroups, hiddenRows } = useMemo(() => {
     const number = (value: string, fallback: number) => (value.trim() === "" ? fallback : Number(value));
     const roiMax = number(filters.roiMax, Infinity);
     const volumeMin = number(filters.volumeMin, 0);
@@ -455,8 +455,12 @@ export function FeedScreen({ token, snapshot }: { token: string; snapshot: Snaps
       if (query && !row.token.includes(query)) return false;
       return true;
     };
-    const feedRows = (feed?.rows ?? []).filter(keep);
-    const radarRows = (feed?.radar ?? []).filter(keep);
+    // Pairs the API refuses orders on live in their own section: they are worth seeing and cannot be clicked,
+    // so mixing them into the feed would put unopenable rows above openable ones.
+    const byHand = (row: FeedRow) => row.manual_only;
+    const feedRows = (feed?.rows ?? []).filter(keep).filter((row) => !byHand(row));
+    const radarRows = (feed?.radar ?? []).filter(keep).filter((row) => !byHand(row));
+    const manualRows = [...(feed?.rows ?? []), ...(feed?.radar ?? [])].filter(keep).filter(byHand);
     const feedTokens = new Set(feedRows.map((row) => row.token));
     // A coin in the feed lists its other pairs that are above the threshold right now; its head is always a feed gap.
     const feedKeys = new Set(feedRows.map((row) => row.key));
@@ -464,6 +468,7 @@ export function FeedScreen({ token, snapshot }: { token: string; snapshot: Snaps
     return {
       feedGroups: groupByToken([...feedRows, ...aboveThreshold], filters.sort, (row) => feedKeys.has(row.key)),
       radarGroups: groupByToken(radarRows.filter((row) => !feedTokens.has(row.token)), filters.sort),
+      manualGroups: groupByToken(manualRows, filters.sort),
       hiddenRows: [...hidden.entries()].sort((a, b) => b[1] - a[1]),
     };
   }, [feed, filters, minRoi]);
@@ -617,6 +622,18 @@ export function FeedScreen({ token, snapshot }: { token: string; snapshot: Snaps
               </span>
             </div>
             <GapTable groups={inHeldOrder(radarGroups, "radar")} scope="radar" {...common} />
+          </>
+        )}
+
+        {manualGroups.length > 0 && (
+          <>
+            <div className="toolbar section-title">
+              <span>
+                <span className="chip">ТОЛЬКО РУКАМИ</span>{" "}
+                <span className="muted">биржа не принимает ордера по API — такую вилку открывают на её сайте</span>
+              </span>
+            </div>
+            <GapTable groups={inHeldOrder(manualGroups, "manual")} scope="manual" {...common} />
           </>
         )}
       </section>

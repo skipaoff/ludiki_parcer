@@ -58,10 +58,11 @@ def parse_instruments(raw: dict[str, Any]) -> list[Instrument]:
             or item.get("quoteCoin") != "USDT"
             or item.get("settleCoin") != "USDT"
             or item.get("state") != 0
-            or not item.get("apiAllowed", False)
             or item.get("isHidden", False)
         ):
             continue
+        # apiAllowed=false contracts used to be dropped here. They quote and their gaps are real, they just
+        # cannot be ordered through the API — the feed shows them apart, to be taken by hand or not at all.
         parsed = parse_symbol(item["symbol"], "mexc")
         if parsed is None:
             continue
@@ -77,6 +78,7 @@ def parse_instruments(raw: dict[str, Any]) -> list[Instrument]:
                 max_market_qty_units=_decimal(item.get("maxVol")),
                 min_notional_usd=Decimal(0),
                 price_tick=_decimal(item.get("priceUnit")),
+                api_tradable=bool(item.get("apiAllowed", False)),
             )
         )
     return instruments

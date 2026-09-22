@@ -62,7 +62,13 @@ class PairRecord:
         return self.assessment.suspicious_reason is not None and not self.manually_verified
 
     @property
+    def manual_only(self) -> bool:
+        return self.assessment.manual_only
+
+    @property
     def tradable(self) -> bool:
+        # manual_only pairs stay tradable here: they earn order books and a place in the feed like any other,
+        # and it is the Open button that refuses them. Hiding them would lose gaps that can be taken by hand.
         return not self.blacklisted and not self.suspicious
 
 

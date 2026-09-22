@@ -58,6 +58,9 @@ class Instrument:
     max_market_qty_units: Decimal | None
     min_notional_usd: Decimal
     price_tick: Decimal | None = None
+    # False when the exchange quotes the contract but refuses orders on it through the API — MEXC marks such
+    # contracts apiAllowed=false. The gap is real and can be taken by hand on the exchange, never by the button.
+    api_tradable: bool = True
 
     @property
     def qty_step_tokens(self) -> Decimal:

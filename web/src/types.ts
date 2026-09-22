@@ -126,6 +126,8 @@ export interface FeedRow {
   lifetime_ms: number | null;
   volume24h_weak_usd: string | null;
   suspicious: boolean;
+  /** A leg the exchange refuses orders on through the API: the gap is real, only the button cannot take it. */
+  manual_only: boolean;
   blacklisted: boolean;
   block: string | null;
   open_blocks?: string[];

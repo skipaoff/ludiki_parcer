@@ -10,6 +10,7 @@ GOOD = OpenFacts(
     trading_enabled=True,
     token="SOL",
     tradable_pair=True,
+    manual_only=False,
     both_legs_fresh=True,
     roi_net_pct=D("0.8"),
     qty_problem=None,
@@ -30,6 +31,11 @@ GOOD = OpenFacts(
 
 def test_clean_facts_pass():
     assert open_blocks(GOOD, LIMITS) == []
+
+
+def test_a_pair_the_api_refuses_orders_on_can_never_be_opened_by_the_button():
+    """MEXC quotes such contracts and their gaps are real; the exchange simply rejects orders placed through the API."""
+    assert open_blocks(replace(GOOD, manual_only=True), LIMITS) == ["manual_only"]
 
 
 def test_every_failed_check_is_reported_together():

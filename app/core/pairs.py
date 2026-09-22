@@ -53,6 +53,11 @@ class PairAssessment:
     volume24h_a_usd: Decimal | None = None
     volume24h_b_usd: Decimal | None = None
 
+    @property
+    def manual_only(self) -> bool:
+        """A leg the exchange refuses orders on through the API. The gap is real; the button can never take it."""
+        return not (self.a.api_tradable and self.b.api_tradable)
+
 
 def per_token(price: Decimal | None, instrument: Instrument) -> Decimal | None:
     if price is None or price <= 0:

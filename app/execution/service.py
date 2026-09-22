@@ -200,6 +200,7 @@ class ExecutionService:
             trading_enabled=self._settings.enabled,
             token=record.assessment.token,
             tradable_pair=record.tradable,
+            manual_only=record.manual_only,
             both_legs_fresh=fresh,
             roi_net_pct=quote.roi_net_pct,
             qty_problem=qty_problem,

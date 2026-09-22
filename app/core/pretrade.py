@@ -26,6 +26,7 @@ class OpenFacts:
     trading_enabled: bool
     token: str
     tradable_pair: bool
+    manual_only: bool
     both_legs_fresh: bool
     roi_net_pct: Decimal | None
     qty_problem: str | None
@@ -56,6 +57,8 @@ def open_blocks(facts: OpenFacts, limits: RiskLimits) -> list[str]:
             reasons.append(f"exchange_blocked:{blocked}")
     if not facts.tradable_pair:
         reasons.append("pair_not_tradable")
+    if facts.manual_only:
+        reasons.append("manual_only")
     if not facts.both_legs_fresh:
         reasons.append("stale")
     if facts.qty_problem:

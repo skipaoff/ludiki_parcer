@@ -602,6 +602,7 @@ class PriceGapEngine:
             "lifetime_ms": lifetime_ms,
             "volume24h_weak_usd": _text(assessment.volume24h_weak_usd, 6),
             "suspicious": record.suspicious,
+            "manual_only": record.manual_only,
             "blacklisted": record.blacklisted,
             "block": block,
             "profit_usd": None if profit_pct is None else _text(profit_pct * size / 100, 4),

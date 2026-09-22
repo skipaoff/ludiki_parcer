@@ -38,8 +38,14 @@ def test_binance_multiplier_contract_units():
     assert binance_instruments()["1INCHUSDT"].token == "1INCH"
 
 
-def test_mexc_keeps_only_open_usdt_perpetuals_allowed_for_api():
-    assert set(mexc_instruments()) == {"BTC_USDT", "PEPE_USDT", "1INCH_USDT", "1000000MOG_USDT", "ONE_USDT", "1000BONK_USDT"}
+def test_mexc_keeps_open_usdt_perpetuals_and_marks_the_ones_the_api_refuses():
+    items = mexc_instruments()
+
+    # BTC_USDC is settled in USDC and never belongs here. EMBER is quoted but apiAllowed=false: its gaps are real
+    # and can be taken by hand on the exchange, so it is kept and marked rather than dropped.
+    assert set(items) == {"BTC_USDT", "PEPE_USDT", "1INCH_USDT", "1000000MOG_USDT", "ONE_USDT", "1000BONK_USDT", "EMBER_USDT"}
+    assert items["EMBER_USDT"].api_tradable is False
+    assert all(items[symbol].api_tradable for symbol in items if symbol != "EMBER_USDT")
 
 
 def test_mexc_contract_size_and_prefix_multiplier_become_tokens():
