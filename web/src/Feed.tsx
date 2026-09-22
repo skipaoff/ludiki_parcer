@@ -28,7 +28,11 @@ interface Filters {
 
 const DEFAULT_FILTERS: Filters = {
   roiMax: "15",
-  volumeMin: "1000000",
+  // A million hid the market this terminal is for. Measured 22.09.2026 at $1000 a leg: of the four pairs that
+  // survived it, none could absorb the size, while every pair that could sat between 50k and 250k of daily volume.
+  // Gaps live where the volume is modest — the liquid majors are arbitraged away in seconds. Depth, not volume,
+  // is what says whether a size can be filled, so this threshold only throws out contracts that barely trade.
+  volumeMin: "50000",
   capacityMin: "",
   showSuspicious: false,
   showReadOnly: true,
@@ -512,10 +516,11 @@ export function FeedScreen({ token, snapshot }: { token: string; snapshot: Snaps
               onChange={(event) => set("volumeMin", event.target.value)}
             />
           </label>
-          <label title="сколько долларов на ногу выдерживают стаканы, пока профит выше порога">
+          <label title="сколько долларов на ногу выдерживают стаканы, пока профит выше порога. Прямая мера того, возьмётся ли твой размер — в отличие от объёма за сутки. Ставь свой размер на ногу, а лучше полтора: ёмкость считается по входу, выход бывает тоньше">
             глубина ≥ ${" "}
             <input
               value={filters.capacityMin}
+              placeholder={sizeUsd === "—" ? "" : sizeUsd}
               inputMode="decimal"
               onFocus={(event) => event.target.select()}
               onKeyDown={(event) => event.key === "Escape" && set("capacityMin", "")}
