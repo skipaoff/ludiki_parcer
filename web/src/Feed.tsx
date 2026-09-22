@@ -419,26 +419,35 @@ export function FeedScreen({ token, snapshot }: { token: string; snapshot: Snaps
   const sizeUsd = settings?.size_usd ?? "—";
   const enterAfterMs = settings?.enter_after_ms ?? 0;
 
-  const { feedGroups, radarGroups } = useMemo(() => {
+  const { feedGroups, radarGroups, hiddenRows } = useMemo(() => {
     const number = (value: string, fallback: number) => (value.trim() === "" ? fallback : Number(value));
     const roiMax = number(filters.roiMax, Infinity);
     const volumeMin = number(filters.volumeMin, 0);
     const capacityMin = number(filters.capacityMin, 0);
     const query = filters.search.trim().toUpperCase();
+    // Hidden rows are counted by reason: a screen that silently drops half the market cannot be trusted,
+    // and the reason is usually the size — a book that carries $100 a leg may not carry $2000.
+    const hidden = new Map<string, number>();
+    const drop = (reason: string) => {
+      hidden.set(reason, (hidden.get(reason) ?? 0) + 1);
+      return false;
+    };
     const keep = (row: FeedRow) => {
       // A blocked pair cannot be opened and its profit cannot be trusted — stale book, too thin, suspicious,
       // blacklisted, below the exchange minimums. Such a row is not shown at all.
       // "no_book" is not a fault: that is every radar row until its spread comes close enough to the threshold
       // for the terminal to subscribe to the books. Dropping it would empty the radar.
-      if (row.block !== null && row.block !== "no_book") return false;
+      if (row.block !== null && row.block !== "no_book") return drop(row.block.split(":")[0]);
       // The minimum is the terminal's feed threshold; the maximum filters out fake gaps of different assets.
-      if (Number(row.roi_net_pct ?? -Infinity) > roiMax) return false;
-      if (row.volume24h_weak_usd !== null && Number(row.volume24h_weak_usd) < volumeMin) return false;
-      if (capacityMin && Number(row.capacity_usd ?? 0) < capacityMin) return false;
-      if (!filters.showSuspicious && row.suspicious) return false;
+      if (Number(row.roi_net_pct ?? -Infinity) > roiMax) return drop("профит выше максимума");
+      if (row.volume24h_weak_usd !== null && Number(row.volume24h_weak_usd) < volumeMin) return drop("мал объём 24ч");
+      if (capacityMin && Number(row.capacity_usd ?? 0) < capacityMin) return drop("мала глубина");
+      if (!filters.showSuspicious && row.suspicious) return drop("подозрительные");
       if (filters.longExchange && row.long?.exchange !== filters.longExchange) return false;
       if (filters.shortExchange && row.short?.exchange !== filters.shortExchange) return false;
-      if (!filters.showReadOnly && (READ_ONLY.has(row.long?.exchange ?? "") || READ_ONLY.has(row.short?.exchange ?? ""))) return false;
+      if (!filters.showReadOnly && (READ_ONLY.has(row.long?.exchange ?? "") || READ_ONLY.has(row.short?.exchange ?? ""))) {
+        return drop("без торговли");
+      }
       if (query && !row.token.includes(query)) return false;
       return true;
     };
@@ -451,6 +460,7 @@ export function FeedScreen({ token, snapshot }: { token: string; snapshot: Snaps
     return {
       feedGroups: groupByToken([...feedRows, ...aboveThreshold], filters.sort, (row) => feedKeys.has(row.key)),
       radarGroups: groupByToken(radarRows.filter((row) => !feedTokens.has(row.token)), filters.sort),
+      hiddenRows: [...hidden.entries()].sort((a, b) => b[1] - a[1]),
     };
   }, [feed, filters, minRoi]);
 
@@ -577,6 +587,12 @@ export function FeedScreen({ token, snapshot }: { token: string; snapshot: Snaps
         {feedGroups.length === 0 && (
           <p className="empty muted">
             {feed ? `Сейчас нет вилок выше порога дольше ${Math.round(enterAfterMs / 1000)} с.` : "Лента запускается…"}
+          </p>
+        )}
+        {hiddenRows.length > 0 && (
+          <p className="empty muted" title="строки, которые терминал посчитал, но не показал. «мало глубины» и «больше макс. ордера» зависят от размера на ногу: уменьшите его, и часть строк вернётся">
+            скрыто {hiddenRows.reduce((sum, [, count]) => sum + count, 0)}:{" "}
+            {hiddenRows.map(([reason, count]) => `${reasonText(reason)} ${count}`).join(" · ")}
           </p>
         )}
         {tradeMessage && (

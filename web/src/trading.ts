@@ -25,6 +25,9 @@ const REASONS: Record<string, string> = {
   no_book: "нет стакана",
   book_too_thin: "глубины не хватает на размер",
   size_below_common_step: "размер меньше шага количества",
+  suspicious: "подозрительная пара",
+  blacklisted: "в чёрном списке",
+  non_positive_input: "биржа не отдала цену",
   no_quantity: "количество не рассчитано",
 };
 
