@@ -17,7 +17,9 @@ def trade_url(instrument: Instrument) -> str | None:
     if instrument.exchange == "binance":
         return f"https://www.binance.com/en/futures/{raw}"
     if instrument.exchange == "mexc":
-        return f"https://futures.mexc.com/exchange/{raw}"
+        # futures.mexc.com/exchange/<symbol> was retired: it now redirects to plain http on www, where Akamai
+        # answers "Access Denied", and it loses the symbol on the way. Checked 22.09.2026.
+        return f"https://www.mexc.com/futures/{raw}"
     if instrument.exchange == "gate":
         return f"https://www.gate.com/futures/USDT/{raw}"
     if instrument.exchange == "aster":

@@ -4,6 +4,7 @@ import json
 from decimal import Decimal
 from pathlib import Path
 
+from app.core.links import trade_url
 from app.core.pairs import assess_pair, match_instruments
 from app.core.qty import plan_quantity
 from app.exchanges.binance import adapter as binance
@@ -72,6 +73,13 @@ def test_recorded_pairs_match_and_multipliers_agree_per_token():
     assert assessed["BTC"].suspicious_reason is None
     # On the recording day ONE's index prices disagreed by about 4.7 %.
     assert assessed["ONE"].suspicious_reason == "index_mismatch"
+
+
+def test_trade_links_point_at_the_pages_the_exchanges_serve_today():
+    # MEXC retired futures.mexc.com/exchange/<symbol>: it redirects to plain http, where Akamai answers
+    # "Access Denied", and loses the symbol on the way. Checked in a browser 22.09.2026.
+    assert trade_url(mexc_instruments()["PEPE_USDT"]) == "https://www.mexc.com/futures/PEPE_USDT"
+    assert trade_url(binance_instruments()["1000PEPEUSDT"]) == "https://www.binance.com/en/futures/1000PEPEUSDT"
 
 
 def test_one_token_count_is_valid_on_both_exchanges_for_pepe():
