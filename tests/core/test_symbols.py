@@ -25,6 +25,23 @@ def test_parse_symbol_keeps_multiplier_contracts(raw, exchange, token, multiplie
 
 
 @pytest.mark.parametrize(
+    ("raw", "exchange", "token"),
+    [
+        # The same stock, written both ways: MEXC adds the suffix, the other three do not.
+        ("AAPLSTOCK_USDT", "mexc", "AAPL"),
+        ("AAPLUSDT", "bybit", "AAPL"),
+        ("SITMSTOCK_USDT", "mexc", "SITM"),
+        ("SITMUSDT", "bitget", "SITM"),
+        ("PENGSTOCKUSDT", "bybit", "PENG"),
+        # A coin whose own name ends there keeps it: the stem has to be a name of its own.
+        ("STOCKUSDT", "binance", "STOCK"),
+    ],
+)
+def test_the_stock_suffix_is_not_part_of_the_name(raw, exchange, token):
+    assert parse_symbol(raw, exchange) == ParsedSymbol(token, Decimal(1))
+
+
+@pytest.mark.parametrize(
     ("raw", "exchange"),
     [("BTCUSDC", "binance"), ("BTCUSD", "bybit"), (".BTCUSDT", "binance"), ("@107", "hyperliquid"), ("USDT", "binance")],
 )

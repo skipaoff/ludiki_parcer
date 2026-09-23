@@ -4,6 +4,8 @@ Changes when: exchanges introduce a new naming convention or the same-asset rule
 Anti-goal:
 1. Dropping multiplier contracts like 1000PEPE — the parser did that and lost tradable pairs.
 2. Trusting the ticker alone — identical tickers on two exchanges can be different tokens.
+3. Deciding by the name alone that two contracts are the same asset — the name brings them together, the index
+   prices decide, and a disagreement makes the pair suspicious.
 
 Ported from crypto_pars/price_gap.py::normalize with three fixes:
 - multiplier prefixes (1000, 10000, 1000000, 1M, Hyperliquid "k") are parsed instead of discarded;
@@ -26,6 +28,12 @@ MULTIPLIER_PREFIXES = (
     ("1M", Decimal(1_000_000)),
 )
 TOKEN_ALIASES = {"XBT": "BTC"}
+# MEXC writes an equity perpetual as AAPLSTOCK where Gate, Bitget and Bybit write AAPL. Measured on 23.09.2026:
+# 560 contracts are named both ways and their indices agree to within 1 %, and none of them had a pair at all —
+# MEXC alone carries 320 of these. The bare ticker is the stock's own name and what three venues of four use, so
+# it is the canonical one. The handful of tickers that collide with a coin of the same name (BB, QNT, STX, 4) are
+# caught where every pair is: the indices disagree, the pair is marked suspicious and stays out of the feed.
+STOCK_SUFFIX = "STOCK"
 
 
 @dataclass(frozen=True, slots=True)
@@ -60,6 +68,9 @@ def parse_symbol(raw: str, exchange: str) -> ParsedSymbol | None:
             upper = rest
             multiplier = value
             break
+
+    if upper.endswith(STOCK_SUFFIX) and len(upper) > len(STOCK_SUFFIX):
+        upper = upper[: -len(STOCK_SUFFIX)]
 
     if not upper or not upper[0].isalnum():
         return None
