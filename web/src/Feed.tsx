@@ -657,9 +657,17 @@ export function FeedScreen({ token, snapshot }: { token: string; snapshot: Snaps
             </p>
           )}
           {hiddenRows.length > 0 && (
-            <p className="empty muted" title="строки, которые терминал посчитал, но не показал. «мало глубины» и «больше макс. ордера» зависят от размера на ногу: уменьшите его, и часть строк вернётся">
-              скрыто {hiddenRows.reduce((sum, [, count]) => sum + count, 0)}:{" "}
-              {hiddenRows.map(([reason, count]) => `${reasonText(reason)} ${count}`).join(" · ")}
+            // The count stays on screen because an empty feed must not look like an empty market; the breakdown
+            // moved to the hint, where it is there when a row is missing and out of the way when it is not.
+            <p
+              className="empty muted"
+              title={
+                "строки, которые терминал посчитал, но не показал:\n" +
+                hiddenRows.map(([reason, count]) => `${count} — ${reasonText(reason)}`).join("\n") +
+                "\n\nглубина и максимум ордера зависят от размера на ногу: уменьшите его, и часть строк вернётся"
+              }
+            >
+              скрыто {hiddenRows.reduce((sum, [, count]) => sum + count, 0)}
             </p>
           )}
           {tradeMessage && (
