@@ -1,6 +1,6 @@
 from decimal import Decimal
 
-from app.core.pairs import Quote, assess_pair, match_instruments
+from app.core.pairs import Quote, assess_pair, match_instruments, rename_lonely_contracts
 from tests.core.helpers import D, instrument
 
 
@@ -63,3 +63,75 @@ def test_mid_prefers_book_over_mark():
     assert Quote(bid=D("1"), ask=D("3"), mark=D("10")).mid == D("2")
     assert Quote(bid=D("0"), ask=D("3"), mark=D("10")).mid == D("10")
     assert Quote().mid is None
+
+
+def market(**prices: str) -> dict[tuple[str, str], Decimal]:
+    """Index price per (exchange, token), written as "exchange__token"."""
+    return {tuple(key.split("__")): D(value) for key, value in prices.items()}
+
+
+def test_a_contract_nobody_else_names_the_same_way_takes_the_market_name():
+    # Binance writes RAYSOL, three other venues write RAY, and every one of them prices it the same.
+    lonely = instrument("binance", "RAYSOLUSDT", "RAYSOL")
+    catalog = {
+        "binance": [lonely],
+        "mexc": [instrument("mexc", "RAY_USDT", "RAY")],
+        "gate": [instrument("gate", "RAY_USDT", "RAY")],
+    }
+
+    named = rename_lonely_contracts(catalog, market(binance__RAYSOL="2.15", mexc__RAY="2.1505", gate__RAY="2.1499"))
+
+    assert [item.token for item in named["binance"]] == ["RAY"]
+    assert [(a.symbol_raw, b.symbol_raw) for a, b in match_instruments(named["binance"], named["mexc"])] == [("RAYSOLUSDT", "RAY_USDT")]
+
+
+def test_a_name_that_looks_alike_but_is_priced_differently_keeps_its_own():
+    # SOLV is not SOL, whatever the spelling suggests, and the index prices say so.
+    catalog = {
+        "binance": [instrument("binance", "SOLVUSDT", "SOLV")],
+        "mexc": [instrument("mexc", "SOL_USDT", "SOL")],
+        "gate": [instrument("gate", "SOL_USDT", "SOL")],
+    }
+
+    named = rename_lonely_contracts(catalog, market(binance__SOLV="0.41", mexc__SOL="196.2", gate__SOL="196.3"))
+
+    assert [item.token for item in named["binance"]] == ["SOLV"]
+
+
+def test_a_contract_that_already_has_a_pair_is_never_renamed():
+    catalog = {
+        "binance": [instrument("binance", "RAYUSDT", "RAY")],
+        "mexc": [instrument("mexc", "RAY_USDT", "RAY")],
+        "gate": [instrument("gate", "RAYSOL_USDT", "RAYSOL")],
+    }
+
+    named = rename_lonely_contracts(catalog, market(binance__RAY="2.15", mexc__RAY="2.15", gate__RAYSOL="2.15"))
+
+    assert [item.token for item in named["binance"]] == ["RAY"]
+    assert [item.token for item in named["mexc"]] == ["RAY"]
+    assert [item.token for item in named["gate"]] == ["RAY"]
+
+
+def test_without_an_index_price_the_name_stands():
+    catalog = {
+        "binance": [instrument("binance", "RAYSOLUSDT", "RAYSOL")],
+        "mexc": [instrument("mexc", "RAY_USDT", "RAY")],
+        "gate": [instrument("gate", "RAY_USDT", "RAY")],
+    }
+
+    named = rename_lonely_contracts(catalog, market(mexc__RAY="2.15", gate__RAY="2.15"))
+
+    assert [item.token for item in named["binance"]] == ["RAYSOL"]
+
+
+def test_indices_that_merely_cross_are_not_the_same_coin():
+    # gate's GIGGLEMAX and aster's MAX were 0.49 % apart by index and 5 % apart by price: different coins.
+    catalog = {
+        "gate": [instrument("gate", "GIGGLEMAX_USDT", "GIGGLEMAX")],
+        "aster": [instrument("aster", "MAXUSDT", "MAX")],
+        "mexc": [instrument("mexc", "MAX_USDT", "MAX")],
+    }
+
+    named = rename_lonely_contracts(catalog, market(gate__GIGGLEMAX="0.0070601", aster__MAX="0.0070256", mexc__MAX="0.0070260"))
+
+    assert [item.token for item in named["gate"]] == ["GIGGLEMAX"]

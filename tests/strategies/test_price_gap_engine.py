@@ -319,7 +319,7 @@ def test_radar_lists_coins_with_their_pairs():
     radar = engine.view()["radar"]
     coins = [row["token"] for row in radar]
     assert set(coins) == {"AAA", "BBB"}  # two coins, the widest spreads
-    assert coins.count("AAA") == 10 == engine_module.RADAR_PAIRS_PER_TOKEN  # every pair of a coin on five exchanges
+    assert coins.count("AAA") == 10 <= engine_module.RADAR_PAIRS_PER_TOKEN  # every pair of a coin on five exchanges, none cut by the cap
 
 
 def test_unchanged_books_are_not_walked_again(monkeypatch):

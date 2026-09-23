@@ -395,7 +395,8 @@ class ExecutionService:
             opened_at_ms=int(clicked),
             status="opening",
             pair_id=record.pair_id,
-            size_usd=self._size_usd(),
+            # What the pair is actually opened for: a venue capping its market order makes it smaller than the setting.
+            size_usd=qty * quote.long_avg if qty and quote.long_avg else self._size_usd(),
             leverage_long=self._leverage(long.exchange),
             leverage_short=self._leverage(short.exchange),
             margin_mode="isolated" if self._settings.isolated else "cross",

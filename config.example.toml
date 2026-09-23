@@ -85,9 +85,9 @@ min_roi_pct = 1.00              # net ROI by book, after round-trip taker fees, 
                                 # paid even at the best possible exit, and they were three quarters of the flow.
                                 # Above 2 %, 69 in 100 would have paid. The radar still shows what is below.
 candidate_margin_pct = 0.50     # pairs this close to the threshold by best prices get order-book subscriptions
-book_limit = 60                 # pairs with live order books at once
+book_limit = 120                # pairs with live order books at once: the number of gaps measured by book, not by top price
 tracking_limit = 20             # of those, at most this many follow gaps that left the feed until prices converge
-radar_rows = 20                 # coins with the best current spreads shown under the feed even below the threshold
+radar_rows = 40                 # coins with the best current spreads shown under the feed even below the threshold
 funding_horizon_h = 8           # hours of funding counted into the expected result of a gap
 fresh_ms = 1000                 # a leg whose book changed longer ago than this greys the row out...
 quiet_book_max_ms = 10000       # ...unless the exchange's best prices, received after the book, still match it: books are pushed only on change

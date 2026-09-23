@@ -383,6 +383,12 @@ function GapLine({
       >
         {row.profit_usd === null ? "—" : signedUsd(row.profit_usd)}
         {row.roi_net_pct !== null && <span className="muted"> {signedPct(row.roi_net_pct)}</span>}
+        {row.capped_by !== null && row.size_usd !== null && (
+          // The venue will not take the whole size in one market order, so the row is quoted on what it will take.
+          <span className="chip chip-note" title={`${row.capped_by.toUpperCase()} не принимает рыночный ордер больше этой суммы, поэтому строка посчитана на неё, а не на $${sizeUsd}`}>
+            ${Math.round(Number(row.size_usd))}
+          </span>
+        )}
       </td>
       <td>
         <FundingCell row={row} horizonH={horizonH} now={now} />

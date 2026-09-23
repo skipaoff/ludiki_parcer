@@ -18,7 +18,7 @@ from typing import Any, Callable
 
 from app.config.settings import InstrumentsSettings
 from app.core.links import trade_url
-from app.core.pairs import PairAssessment, Quote, assess_pair, match_all
+from app.core.pairs import PairAssessment, Quote, assess_pair, match_all, rename_lonely_contracts
 from app.core.schemas import Instrument
 from app.journal.journal import Journal, Level
 from app.storage.catalog import StoredPair, pair_key, save_catalog, set_pair_flags
@@ -41,10 +41,27 @@ def assess_catalog(
     max_price_gap_pct: Decimal,
     max_index_gap_pct: Decimal,
 ) -> list[PairAssessment]:
+    # A contract left without a pair may only be spelled differently; the index price says whether it is the
+    # same asset, and if it is, it joins the group under the name the rest of the market uses.
+    named = rename_lonely_contracts(by_exchange, _index_per_token(by_exchange, quotes))
     return [
         assess_pair(a, b, quotes.get((a.exchange, a.symbol_raw)), quotes.get((b.exchange, b.symbol_raw)), max_price_gap_pct, max_index_gap_pct)
-        for a, b in match_all(by_exchange, order)
+        for a, b in match_all(named, order)
     ]
+
+
+def _index_per_token(by_exchange: dict[str, list[Instrument]], quotes: dict[tuple[str, str], Quote]) -> dict[tuple[str, str], Decimal]:
+    """Index price of one token on one exchange, in per-token units so multiplier contracts compare."""
+    prices: dict[tuple[str, str], Decimal] = {}
+    for exchange, instruments in by_exchange.items():
+        for item in instruments:
+            quote = quotes.get((exchange, item.symbol_raw))
+            if quote is None:
+                continue
+            price = quote.index if quote.index and quote.index > 0 else quote.mark
+            if price and price > 0:
+                prices[(exchange, item.token)] = price / item.price_unit_tokens
+    return prices
 
 
 @dataclass

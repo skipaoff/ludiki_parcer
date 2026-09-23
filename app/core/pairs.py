@@ -9,7 +9,7 @@ Anti-goal:
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from decimal import Decimal
 
 from app.core.qty import common_step_tokens
@@ -72,6 +72,64 @@ def match_instruments(left: list[Instrument], right: list[Instrument]) -> list[t
         by_token.setdefault(instrument.token, []).append(instrument)
     pairs = [(a, b) for a in left for b in by_token.get(a.token, [])]
     return sorted(pairs, key=lambda pair: (pair[0].token, pair[0].symbol_raw, pair[1].symbol_raw))
+
+
+def rename_lonely_contracts(
+    by_exchange: dict[str, list[Instrument]],
+    index_per_token: dict[tuple[str, str], Decimal],
+    max_index_diff_pct: Decimal = Decimal("0.25"),
+) -> dict[str, list[Instrument]]:
+    """
+    Give a contract that nobody else names the same way the name the rest of the market uses for it.
+
+    A venue writes RAYSOL where five others write RAY, TRUMPSOL where eight write TRUMP, NOKIA for NOK. The
+    name alone proves nothing, so the index price decides, and a quarter of a percent is the whole allowance:
+    every one of the renames measured on 23.09.2026 agreed to 0.22 % or better, while gate's GIGGLEMAX sat
+    0.49 % from aster's MAX with perpetual prices 5 % apart — two different coins whose indices happened to
+    cross. Only contracts with no pair at all are renamed, and only onto a token that exists on another
+    exchange, so nothing that already trades can lose its name this way.
+    """
+    venues_of: dict[str, set[str]] = {}
+    for exchange, instruments in by_exchange.items():
+        for item in instruments:
+            venues_of.setdefault(item.token, set()).add(exchange)
+
+    renamed: dict[str, list[Instrument]] = {}
+    for exchange, instruments in by_exchange.items():
+        fixed = []
+        for item in instruments:
+            token = item.token if len(venues_of.get(item.token, ())) > 1 else _name_of_the_market(item, exchange, venues_of, index_per_token, max_index_diff_pct)
+            fixed.append(item if token == item.token else replace(item, token=token))
+        renamed[exchange] = fixed
+    return renamed
+
+
+def _name_of_the_market(
+    item: Instrument,
+    exchange: str,
+    venues_of: dict[str, set[str]],
+    index_per_token: dict[tuple[str, str], Decimal],
+    max_index_diff_pct: Decimal,
+) -> str:
+    """The established token this lonely contract is priced like, or its own name when there is none."""
+    mine = index_per_token.get((exchange, item.token))
+    if mine is None or mine <= 0:
+        return item.token
+    best, best_venues = item.token, 0
+    for token, venues in venues_of.items():
+        # The other name has to be an established one: on another exchange, and long enough not to match by chance.
+        if len(token) < 3 or len(venues) <= best_venues or venues == {exchange}:
+            continue
+        if not (item.token.startswith(token) or item.token.endswith(token)) or token == item.token:
+            continue
+        for other in venues - {exchange}:
+            theirs = index_per_token.get((other, token))
+            if theirs is None or theirs <= 0:
+                continue
+            if price_gap_pct(mine, theirs) <= max_index_diff_pct:
+                best, best_venues = token, len(venues)
+                break
+    return best
 
 
 def match_all(by_exchange: dict[str, list[Instrument]], order: list[str]) -> list[tuple[Instrument, Instrument]]:

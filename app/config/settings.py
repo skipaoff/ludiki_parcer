@@ -151,9 +151,12 @@ class FeedSettings(_Section):
     size_usd: Decimal = Field(default=Decimal("100"), gt=0)
     min_roi_pct: Decimal = Decimal("1.00")
     candidate_margin_pct: Decimal = Field(default=Decimal("0.50"), ge=0)
-    book_limit: int = Field(default=60, ge=2, le=200)
+    # Books are what turn a spread into a number, and the cap was the binding one: 60 books against 16,463 ranked
+    # pairs, full every tick, at 21 ms of a 200 ms tick (23.09.2026). Depth streams are cheap — 120 pairs is 240
+    # of the 200 streams a connection takes, spread over nine venues.
+    book_limit: int = Field(default=120, ge=2, le=400)
     tracking_limit: int = Field(default=20, ge=0, le=200)
-    radar_rows: int = Field(default=20, ge=0, le=100)  # coins in the radar, each with up to RADAR_PAIRS_PER_TOKEN pairs
+    radar_rows: int = Field(default=40, ge=0, le=100)  # coins in the radar, each with up to RADAR_PAIRS_PER_TOKEN pairs
     funding_horizon_h: Decimal = Field(default=Decimal("8"), ge=1, le=168)  # funding counted into the expected result
     fresh_ms: int = Field(default=1000, ge=100)
     quiet_book_max_ms: int = Field(default=10000, ge=1000)

@@ -42,7 +42,7 @@ RESUBSCRIBE_COOLDOWN_MS = 5_000
 RADAR_SLICES = 5  # a large catalog's radar is refreshed over this many ticks...
 RADAR_MAX_PAIRS_PER_TICK = 1500  # ...but never more pairs than this in one tick (18,000 pairs: every 2.4 s)
 RADAR_FULL_PASS_PAIRS = 500  # up to this many pairs the whole radar is refreshed every tick
-RADAR_PAIRS_PER_TOKEN = 10  # the radar lists coins; each coin brings at most this many of its pairs
+RADAR_PAIRS_PER_TOKEN = 15  # the radar lists coins; each coin brings at most this many of its pairs
 _net_roi = attrgetter("roi_net_pct")
 
 
@@ -68,6 +68,9 @@ class _Quote:
     long_exit_avg: Decimal | None = None
     short_exit_avg: Decimal | None = None
     qty_tokens: Decimal | None = None
+    """What the quantity is worth on the long leg: the size asked for, or less when a venue caps its market order."""
+    size_usd: Decimal | None = None
+    capped_by: str | None = None
     roi_gross_pct: Decimal | None = None
     roi_net_pct: Decimal | None = None
     exit_spread_pct: Decimal | None = None
@@ -94,6 +97,8 @@ class _BookNumbers:
     long: Instrument | None = None
     short: Instrument | None = None
     qty_tokens: Decimal | None = None
+    size_usd: Decimal | None = None
+    capped_by: str | None = None
     entry: EntryQuote | None = None
     exit: ExitQuote | None = None
     capacity_usd: Decimal | None = None
@@ -434,6 +439,7 @@ class PriceGapEngine:
                 quote.long, quote.short = long, short
                 quote.long_avg, quote.short_avg = entry.long_avg, entry.short_avg
                 quote.qty_tokens = numbers.qty_tokens
+                quote.size_usd, quote.capped_by = numbers.size_usd, numbers.capped_by
                 quote.roi_gross_pct, quote.roi_net_pct = entry.roi_gross_pct, entry.roi_net_pct
                 quote.exit_spread_pct = exit.exit_spread_pct if exit else None
                 quote.long_exit_avg = exit.long_exit_avg if exit else None
@@ -497,6 +503,7 @@ class PriceGapEngine:
                 long, short = (a, b) if entry.long_exchange == a.exchange else (b, a)
                 long_book, short_book = (book_a, book_b) if long is a else (book_b, book_a)
                 numbers.long, numbers.short, numbers.qty_tokens, numbers.entry = long, short, plan.qty_tokens, entry
+                numbers.size_usd, numbers.capped_by = plan.qty_tokens * entry.long_avg, plan.capped_by
                 numbers.exit = exit_quote(long_book, short_book, plan.qty_tokens)
         self._book_numbers[record.key] = numbers
         return numbers
@@ -560,7 +567,7 @@ class PriceGapEngine:
                 funding_view,
                 long,
                 short,
-                None if quote is None else (quote.qty_tokens, quote.roi_net_pct, quote.capacity_usd, quote.problem),
+                None if quote is None else (quote.qty_tokens, quote.size_usd, quote.roi_net_pct, quote.capacity_usd, quote.problem),
             )
             memo = self._row_memo.get(record.key)
             if memo is not None and memo[0] == memo_signature:
@@ -574,7 +581,9 @@ class PriceGapEngine:
             block = "no_book"
         elif quote.problem:
             block = quote.problem
-        size = self._settings.size_usd
+        # The size this row is actually quoted on: a venue that caps its market order gets the size it takes,
+        # and the money columns are that size's money, not the one asked for.
+        size = (quote.size_usd if quote and quote.size_usd else None) or self._settings.size_usd
         lifetime_ms = int(now - episode.detected_ms) if episode else None
         profit_pct = quote.roi_net_pct if quote else None
         # Expected result: the spread after book and fees if prices converge, plus funding over the horizon.
@@ -595,6 +604,8 @@ class PriceGapEngine:
             "long": None if long is None else {"exchange": long.exchange, "symbol": long.symbol_raw, "url": trade_url(long)},
             "short": None if short is None else {"exchange": short.exchange, "symbol": short.symbol_raw, "url": trade_url(short)},
             "qty_tokens": _text(quote.qty_tokens, 12) if quote else None,
+            "size_usd": _text(size, 2),
+            "capped_by": quote.capped_by if quote else None,
             # Profit in % of the size: book-based entry spread minus round-trip taker fees, if prices converge.
             "roi_net_pct": _text(quote.roi_net_pct, 4) if quote else None,
             "capacity_usd": _text(quote.capacity_usd, 6) if quote else None,

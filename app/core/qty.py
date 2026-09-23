@@ -4,6 +4,9 @@ Changes when: the rules for sizing a two-leg position change.
 Anti-goal:
 1. Sizing the legs in dollars — both legs must hold exactly the same number of tokens.
 2. Float arithmetic — steps like 0.001 must stay exact, so everything is Decimal.
+3. Refusing a pair because the size is too big for it — the size shrinks to what both venues accept and the
+   plan says who shrank it. MEXC caps 122 of its contracts below $1000 a leg, and the gaps worth looking at
+   are exactly there: a contract on its way out keeps its cap and widens its spread.
 """
 
 from __future__ import annotations
@@ -20,6 +23,8 @@ class QtyPlan:
     qty_tokens: Decimal
     units_long: Decimal
     units_short: Decimal
+    """The exchange whose market-order limit made the size smaller than the one asked for, when one did."""
+    capped_by: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -72,6 +77,12 @@ def _limit_violation(qty_tokens: Decimal, price_per_token: Decimal, instrument: 
     return None
 
 
+def market_ceiling(long: Instrument, short: Instrument) -> tuple[Decimal | None, str | None]:
+    """The tighter of the two market-order limits in tokens, and the exchange it belongs to."""
+    limits = [(item.max_market_qty_tokens, item.exchange) for item in (long, short) if item.max_market_qty_tokens is not None]
+    return min(limits, default=(None, None))
+
+
 def plan_quantity(
     size_usd: Decimal,
     price_per_token: Decimal,
@@ -84,10 +95,17 @@ def plan_quantity(
         return QtyRejected("non_positive_input")
     step = common_step_tokens(long, short) if step is None else step
     qty = floor_to_step(size_usd / price_per_token, step)
+    # A venue that will not take the whole size in one market order gets the size it will take, not a refusal:
+    # the gap is still there to be seen, and the row says what fits.
+    ceiling, capped_by = market_ceiling(long, short)
+    if ceiling is not None and qty > ceiling:
+        qty = floor_to_step(ceiling, step)
+    else:
+        capped_by = None
     if qty <= 0:
         return QtyRejected("size_below_common_step")
     for instrument in (long, short):
         violation = _limit_violation(qty, price_per_token, instrument)
         if violation:
             return QtyRejected(violation)
-    return QtyPlan(qty_tokens=qty, units_long=to_units(qty, long), units_short=to_units(qty, short))
+    return QtyPlan(qty_tokens=qty, units_long=to_units(qty, long), units_short=to_units(qty, short), capped_by=capped_by)

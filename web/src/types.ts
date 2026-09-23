@@ -120,6 +120,10 @@ export interface FeedRow {
   long: FeedLeg | null;
   short: FeedLeg | null;
   qty_tokens: string | null;
+  /** The size this row is quoted on: the one in the settings, or less when a venue caps its market order. */
+  size_usd: string | null;
+  /** The exchange that capped it, when one did. */
+  capped_by: string | null;
   roi_net_pct: string | null;
   capacity_usd: string | null;
   phase: "candidate" | "in_feed" | "tracking" | null;

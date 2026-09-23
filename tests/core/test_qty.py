@@ -48,7 +48,6 @@ def test_quantity_is_floored_to_the_coarser_exchange_step():
     [
         ("5", "100", {}, "size_below_common_step"),
         ("150", "100", {"min_notional_usd": "200"}, "below_min_notional:binance"),
-        ("1000", "1", {"max_market_qty_units": "500"}, "above_max_market_qty:binance"),
         ("150", "100", {"min_qty_units": "2"}, "below_min_qty:binance"),
         ("0", "100", {}, "non_positive_input"),
     ],
@@ -57,6 +56,33 @@ def test_plan_quantity_rejections(size, price, overrides, reason):
     binance = instrument("binance", "XUSDT", "X", **overrides)
     mexc = instrument("mexc", "X_USDT", "X", min_notional_usd="0")
     assert plan_quantity(D(size), D(price), long=binance, short=mexc) == QtyRejected(reason)
+
+
+def test_a_venues_market_limit_shrinks_the_size_instead_of_refusing_the_pair():
+    # Binance takes 500 tokens at most in one market order, so $1000 at $1 a token becomes $500 on both legs.
+    binance = instrument("binance", "XUSDT", "X", max_market_qty_units="500")
+    mexc = instrument("mexc", "X_USDT", "X", min_notional_usd="0")
+
+    plan = plan_quantity(D("1000"), D("1"), long=binance, short=mexc)
+
+    assert plan == QtyPlan(qty_tokens=D("500"), units_long=D("500"), units_short=D("500"), capped_by="binance")
+
+
+def test_the_size_that_fits_still_has_to_clear_the_minimums():
+    # A cap below the venue's own minimum quantity leaves nothing to trade.
+    binance = instrument("binance", "XUSDT", "X", max_market_qty_units="1", min_qty_units="5")
+    mexc = instrument("mexc", "X_USDT", "X", min_notional_usd="0")
+
+    assert plan_quantity(D("1000"), D("1"), long=binance, short=mexc) == QtyRejected("below_min_qty:binance")
+
+
+def test_a_size_that_fits_is_not_marked_as_capped():
+    binance = instrument("binance", "XUSDT", "X", max_market_qty_units="5000")
+    mexc = instrument("mexc", "X_USDT", "X", min_notional_usd="0")
+
+    plan = plan_quantity(D("1000"), D("1"), long=binance, short=mexc)
+
+    assert isinstance(plan, QtyPlan) and plan.capped_by is None
 
 
 def test_to_units_refuses_amount_off_the_exchange_step():
