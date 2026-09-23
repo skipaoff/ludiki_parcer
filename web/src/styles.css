@@ -143,6 +143,38 @@ button:disabled {
   width: 10rem;
 }
 
+/* A list that opens over the feed instead of pushing it down: the filter is set rarely and read at a glance. */
+.dropdown {
+  position: relative;
+  display: inline-block;
+}
+
+.dropdown-menu {
+  position: absolute;
+  z-index: 20;
+  top: calc(100% + 0.3rem);
+  left: 0;
+  min-width: 11rem;
+  max-height: 60vh;
+  overflow: auto;
+  padding: 0.25rem 0;
+  border: 1px solid var(--line);
+  background: var(--bg);
+}
+
+.dropdown-item {
+  display: block;
+  width: 100%;
+  padding: 0.15rem 0.7rem;
+  text-align: left;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.dropdown-item:hover {
+  background: var(--line);
+}
+
 /* When the table was last read off the socket: it is ten seconds old at most, and says so rather than pretending. */
 .taken-at {
   margin-left: 1.25rem;

@@ -114,6 +114,65 @@ function DraftInput({
   );
 }
 
+// Eleven exchanges laid out as checkboxes took a whole line of the screen away from the feed and were read every
+// time the eye passed them. Folded into one button, the filter says what is watched in three characters and
+// opens the list only when it is being changed.
+function ExchangePicker({ all, chosen, onChange }: { all: string[]; chosen: string[]; onChange: (next: string[]) => void }) {
+  const [open, setOpen] = useState(false);
+  const box = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const outside = (event: MouseEvent) => {
+      if (!box.current?.contains(event.target as Node)) setOpen(false);
+    };
+    document.addEventListener("mousedown", outside);
+    return () => document.removeEventListener("mousedown", outside);
+  }, [open]);
+
+  const label =
+    chosen.length === 0
+      ? "ВСЕ"
+      : chosen.length <= 2
+        ? chosen.map((name) => name.toUpperCase()).join(" + ")
+        : `${chosen.length} ИЗ ${all.length}`;
+
+  return (
+    <div className="dropdown" ref={box} onKeyDown={(event) => event.key === "Escape" && setOpen(false)}>
+      <button className={chosen.length ? "tab active" : "tab"} type="button" onClick={() => setOpen(!open)}>
+        {label} ▾
+      </button>
+      {open && (
+        <div className="dropdown-menu">
+          <button
+            className="dropdown-item"
+            type="button"
+            onClick={() => {
+              onChange([]);
+              setOpen(false);
+            }}
+          >
+            все биржи
+          </button>
+          {all.map((name) => {
+            const on = chosen.includes(name);
+            return (
+              <label key={name} className="dropdown-item">
+                <input
+                  type="checkbox"
+                  checked={on}
+                  onChange={() => onChange(on ? chosen.filter((item) => item !== name) : [...chosen, name])}
+                />{" "}
+                {name.toUpperCase()}
+              </label>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function SettingsForm({
   token,
   sizeUsd,
@@ -606,6 +665,13 @@ export function FeedScreen({ token, snapshot }: { token: string; snapshot: Snaps
               <input type="checkbox" checked={filters.showReadOnly} onChange={(event) => set("showReadOnly", event.target.checked)} />{" "}
               без торговли
             </label>
+            <span
+              className="muted"
+              title="какие биржи смотрим. Пара попадает в ленту, только если обе её ноги на отмеченных биржах. Ничего не отмечено — смотрим все"
+            >
+              биржи:
+            </span>
+            <ExchangePicker all={exchanges} chosen={filters.exchanges} onChange={(next) => set("exchanges", next)} />
             {touched && (
               <button className="action" type="button" onClick={() => setFilters({ ...DEFAULT_FILTERS, sort: filters.sort })}>
                 [СБРОС ФИЛЬТРОВ]
@@ -613,31 +679,6 @@ export function FeedScreen({ token, snapshot }: { token: string; snapshot: Snaps
             )}
           </div>
 
-          <div className="filter-row" title="какие биржи смотрим. Пара попадает в ленту, только если обе её ноги на отмеченных биржах. Ничего не отмечено — смотрим все">
-            <span className="muted">биржи:</span>
-            <button
-              className={filters.exchanges.length === 0 ? "tab active" : "tab"}
-              type="button"
-              onClick={() => set("exchanges", [])}
-            >
-              все
-            </button>
-            {exchanges.map((name) => {
-              const on = filters.exchanges.includes(name);
-              return (
-                <label key={name} className="check-label">
-                  <input
-                    type="checkbox"
-                    checked={on}
-                    onChange={() =>
-                      set("exchanges", on ? filters.exchanges.filter((item) => item !== name) : [...filters.exchanges, name])
-                    }
-                  />{" "}
-                  {name.toUpperCase()}
-                </label>
-              );
-            })}
-          </div>
         </div>
         <div className="toolbar muted">
           <SettingsForm
