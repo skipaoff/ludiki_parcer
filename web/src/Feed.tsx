@@ -451,9 +451,13 @@ export function FeedScreen({ token, snapshot }: { token: string; snapshot: Snaps
     const roiMax = number(filters.roiMax, Infinity);
     const watched = new Set(filters.exchanges);
     const volumeMin = number(filters.volumeMin, 0);
-    // An empty depth field means the size per leg, as the plan has it: the point of the filter is "will my size
-    // fit", and every one of the 26 gaps that would have paid carried at least $1256.
-    const capacityMin = number(filters.capacityMin, Number(sizeUsd) || 0);
+    // An empty depth field means the size per leg in the feed, as the plan has it: the point of the filter is
+    // "will my size fit", and every one of the 26 gaps that would have paid carried at least $1256. The radar is
+    // the other half of that promise — it watches spreads whose books are not subscribed to yet, so their depth
+    // is unknown and the default floor would empty it. There the filter works only when a number is typed in.
+    const typedCapacity = filters.capacityMin.trim() !== "";
+    const capacityMin = typedCapacity ? Number(filters.capacityMin) : Number(sizeUsd) || 0;
+    const radarCapacityMin = typedCapacity ? capacityMin : 0;
     const query = filters.search.trim().toUpperCase();
     // Hidden rows are counted by reason: a screen that silently drops half the market cannot be trusted,
     // and the reason is usually the size — a book that carries $100 a leg may not carry $2000.
@@ -462,7 +466,7 @@ export function FeedScreen({ token, snapshot }: { token: string; snapshot: Snaps
       hidden.set(reason, (hidden.get(reason) ?? 0) + 1);
       return false;
     };
-    const keep = (row: FeedRow) => {
+    const keep = (row: FeedRow, depthFloor: number) => {
       // A blocked pair cannot be opened and its profit cannot be trusted — stale book, too thin, suspicious,
       // blacklisted, below the exchange minimums. Such a row is not shown at all.
       // "no_book" is not a fault: that is every radar row until its spread comes close enough to the threshold
@@ -472,7 +476,7 @@ export function FeedScreen({ token, snapshot }: { token: string; snapshot: Snaps
       if (Number(row.roi_net_pct ?? -Infinity) > roiMax) return drop("профит выше максимума");
       if (roiMin > -Infinity && Number(row.roi_net_pct ?? -Infinity) < roiMin) return drop("профит ниже минимума");
       if (row.volume24h_weak_usd !== null && Number(row.volume24h_weak_usd) < volumeMin) return drop("мал объём 24ч");
-      if (capacityMin && Number(row.capacity_usd ?? 0) < capacityMin) return drop("мала глубина");
+      if (depthFloor && Number(row.capacity_usd ?? 0) < depthFloor) return drop("мала глубина");
       if (!filters.showSuspicious && row.suspicious) return drop("подозрительные");
       // Both legs must be on watched exchanges: a pair is only useful when you would trade on either side of it.
       if (watched.size > 0 && !(watched.has(row.long?.exchange ?? "") && watched.has(row.short?.exchange ?? ""))) {
@@ -487,9 +491,12 @@ export function FeedScreen({ token, snapshot }: { token: string; snapshot: Snaps
     // Pairs the API refuses orders on live in their own section: they are worth seeing and cannot be clicked,
     // so mixing them into the feed would put unopenable rows above openable ones.
     const byHand = (row: FeedRow) => row.manual_only;
-    const feedRows = (feed?.rows ?? []).filter(keep).filter((row) => !byHand(row));
-    const radarRows = (feed?.radar ?? []).filter(keep).filter((row) => !byHand(row));
-    const manualRows = [...(feed?.rows ?? []), ...(feed?.radar ?? [])].filter(keep).filter(byHand);
+    // Every row passes the filter exactly once, so the hidden count is a count of rows and not of passes.
+    const keptFeed = (feed?.rows ?? []).filter((row) => keep(row, capacityMin));
+    const keptRadar = (feed?.radar ?? []).filter((row) => keep(row, radarCapacityMin));
+    const feedRows = keptFeed.filter((row) => !byHand(row));
+    const radarRows = keptRadar.filter((row) => !byHand(row));
+    const manualRows = [...keptFeed, ...keptRadar].filter(byHand);
     const feedTokens = new Set(feedRows.map((row) => row.token));
     // A coin in the feed lists its other pairs that are above the threshold right now; its head is always a feed gap.
     const feedKeys = new Set(feedRows.map((row) => row.key));
