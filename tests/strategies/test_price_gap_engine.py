@@ -54,7 +54,17 @@ def build(record: PairRecord, **settings):
         Catalog([record]),
         state,
         {"binance": binance, "mexc": mexc},
-        FeedSettings(**{"size_usd": Decimal("1000"), "min_roi_pct": Decimal("0.5"), "enter_after_ms": 300, **settings}),
+        # enter_min_samples=1: these tests drive a handful of ticks and are about everything except how many
+        # readings the feed demands. That rule has its own tests in tests/core/test_episodes.py.
+        FeedSettings(
+            **{
+                "size_usd": Decimal("1000"),
+                "min_roi_pct": Decimal("0.5"),
+                "enter_after_ms": 300,
+                "enter_min_samples": 1,
+                **settings,
+            }
+        ),
         lambda exchange: Decimal("0.05"),
         lambda instruments: radar_symbols.extend(sorted(item.symbol_raw for item in instruments)),
         clock,
@@ -257,7 +267,8 @@ def test_rows_carry_profit_funding_result_and_interest():
     }
     engine = PriceGapEngine(
         Catalog([sol_record()]), state, {"binance": FakeFeed(clock), "mexc": FakeFeed(clock)},
-        FeedSettings(size_usd=Decimal("1000"), min_roi_pct=Decimal("0.5"), enter_after_ms=300), lambda exchange: Decimal("0.05"),
+        FeedSettings(size_usd=Decimal("1000"), min_roi_pct=Decimal("0.5"), enter_after_ms=300, enter_min_samples=1),
+        lambda exchange: Decimal("0.05"),
         lambda instruments: None, clock, funding=lambda exchange, symbol: rates.get((exchange, symbol)),
     )
     engine.tick()

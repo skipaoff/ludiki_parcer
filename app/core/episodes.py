@@ -35,8 +35,12 @@ class EventKind(str, Enum):
 class EpisodeRules:
     """
     enter_after_ms — how long a gap must live before it is shown: dips below the exit level shorter than
-    exit_after_ms do not reset that clock, a longer dip (or no measurement) does. 45 s by the owner's rule (14.09.2026):
-    one-second lead-lag blips cannot be caught by hand.
+    exit_after_ms do not reset that clock, a longer dip (or no measurement) does. 30 s by the owner's rule (23.09.2026),
+    originally 45 s (14.09.2026): one-second lead-lag blips cannot be caught by hand.
+
+    enter_min_samples — how many book measurements above the threshold the gap needs as well. Time alone lets a pair
+    whose books went quiet ride out the wait on one lucky reading; counting the readings makes a live market the price
+    of entry. Both conditions must hold.
 
     The wait proves a gap can be clicked, not that it is real — index agreement, book depth and the volume of
     the weaker leg do that. A gap far above the threshold is the one worth clicking and the one that converges
@@ -45,7 +49,8 @@ class EpisodeRules:
     """
 
     min_roi_net_pct: Decimal
-    enter_after_ms: int = 45_000
+    enter_after_ms: int = 30_000
+    enter_min_samples: int = 5
     fast_enter_multiple: Decimal = Decimal(4)
     fast_enter_after_ms: int = 5_000
     exit_hysteresis_pct: Decimal = Decimal("0.10")
@@ -85,6 +90,7 @@ class EpisodeState:
     phase: Phase
     detected_ms: int
     above_since_ms: int | None = None
+    above_samples: int = 0
     below_since_ms: int | None = None
     first_entered_feed_ms: int | None = None
     roi_at_feed_entry: Decimal | None = None
@@ -147,6 +153,7 @@ def step(
     if state is None:
         if not is_above:
             return None, []
+        # above_samples stays at zero here: the candidate branch below counts this very sample.
         state = EpisodeState(phase=Phase.CANDIDATE, detected_ms=sample.ts_ms, above_since_ms=sample.ts_ms)
 
     if sample.ts_ms - state.detected_ms >= rules.max_lifetime_ms and state.phase is not Phase.CANDIDATE:
@@ -158,8 +165,15 @@ def step(
             if sample.ts_ms - below_since >= rules.exit_after_ms:
                 return None, []
             return replace(state, below_since_ms=below_since), []
-        state = replace(state, below_since_ms=None)
-        if is_above and sample.ts_ms - state.above_since_ms >= wait_before_feed_ms(sample.roi_net_pct, rules):
+        # Only a reading above the threshold counts towards the required number; a dip inside the hysteresis
+        # keeps the episode alive but proves nothing about the gap.
+        samples = state.above_samples + 1 if is_above else state.above_samples
+        state = replace(state, below_since_ms=None, above_samples=samples)
+        if (
+            is_above
+            and sample.ts_ms - state.above_since_ms >= wait_before_feed_ms(sample.roi_net_pct, rules)
+            and samples >= rules.enter_min_samples
+        ):
             entered = _track_peak(_enter_feed(state, sample), sample)
             return entered, [EpisodeEvent(EventKind.ENTERED_FEED, sample.ts_ms)]
         return state, []
@@ -180,11 +194,13 @@ def step(
     if sample.exit_spread_pct is not None and sample.exit_spread_pct <= 0:
         return end(state, sample.ts_ms, "converged")
     if not is_above:
-        return replace(state, above_since_ms=None), []
+        # A gap that fell back starts its count again: returning to the feed is earned, not remembered.
+        return replace(state, above_since_ms=None, above_samples=0), []
     above_since = state.above_since_ms if state.above_since_ms is not None else sample.ts_ms
-    if sample.ts_ms - above_since >= wait_before_feed_ms(sample.roi_net_pct, rules):
+    samples = state.above_samples + 1
+    if sample.ts_ms - above_since >= wait_before_feed_ms(sample.roi_net_pct, rules) and samples >= rules.enter_min_samples:
         return _enter_feed(state, sample), [EpisodeEvent(EventKind.ENTERED_FEED, sample.ts_ms)]
-    return replace(state, above_since_ms=above_since), []
+    return replace(state, above_since_ms=above_since, above_samples=samples), []
 
 
 def end(state: EpisodeState, ts_ms: int, reason: str) -> tuple[EpisodeState, list[EpisodeEvent]]:

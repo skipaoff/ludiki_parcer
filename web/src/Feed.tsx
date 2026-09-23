@@ -6,6 +6,7 @@
 // 3. Hiding why a line cannot be opened — every status has its explanation on hover.
 
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
+import { clock } from "./format";
 import { rateText, settlementTimers, signClass, signedPct, signedUsd } from "./money";
 import { PortfolioColumn } from "./Portfolio";
 import { apiSend } from "./session";
@@ -14,19 +15,25 @@ import type { FeedRow, FeedView, Snapshot } from "./types";
 
 type SortKey = "total" | "profit";
 
+// The feed is read with the eye and the cursor, not watched: at the socket's five frames a second every row
+// twitches and nothing can be followed. A gap has to hold 30 s to enter the feed anyway.
+const REFRESH_MS = 10_000;
+
 interface Filters {
+  roiMin: string;
   roiMax: string;
   volumeMin: string;
   capacityMin: string;
   showSuspicious: boolean;
   showReadOnly: boolean;
-  longExchange: string;
-  shortExchange: string;
+  /** Exchanges to watch. Empty means every one of them; a row passes when both its legs are here. */
+  exchanges: string[];
   search: string;
   sort: SortKey;
 }
 
 const DEFAULT_FILTERS: Filters = {
+  roiMin: "",
   roiMax: "15",
   // A million hid the market this terminal is for. Measured 22.09.2026 at $1000 a leg: of the four pairs that
   // survived it, none could absorb the size, while every pair that could sat between 50k and 250k of daily volume.
@@ -36,8 +43,7 @@ const DEFAULT_FILTERS: Filters = {
   capacityMin: "",
   showSuspicious: false,
   showReadOnly: true,
-  longExchange: "",
-  shortExchange: "",
+  exchanges: [],
   search: "",
   sort: "total",
 };
@@ -50,6 +56,8 @@ function loadFilters(): Filters {
     const stored = { ...DEFAULT_FILTERS, ...JSON.parse(localStorage.getItem("ludik.feed.filters") ?? "{}") };
     // "score" was the interest column, which is gone; a stored one falls back to the expected result.
     if (!["total", "profit"].includes(stored.sort)) stored.sort = "total";
+    // The two long/short dropdowns became one list of exchanges to watch; anything stored from them is dropped.
+    if (!Array.isArray(stored.exchanges)) stored.exchanges = [];
     return stored;
   } catch {
     return DEFAULT_FILTERS;
@@ -391,14 +399,26 @@ export function FeedScreen({ token, snapshot }: { token: string; snapshot: Snaps
   const [filters, setFilters] = useState<Filters>(loadFilters);
   const [tradeMessage, setTradeMessage] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
-  // Numbers follow the socket; only the order of the rows is held while the cursor is over the table,
-  // so a line cannot slide out from under a click. Holding the numbers instead would age the prices,
-  // and a gap priced on stale prices is exactly the fake one this terminal must not show.
+  // The table takes one snapshot every REFRESH_MS: at the socket's rate the numbers twitch on every row and
+  // the screen cannot be read. The price of that is age, so the section says out loud when its numbers were taken.
+  // The order is held besides while the cursor is over the table, so a line cannot slide out from under a click.
   const [holding, setHolding] = useState(false);
   const heldOrder = useRef<Record<string, string[]>>({});
+  const [view, setView] = useState<{ feed: FeedView; at: number } | null>(null);
+  const takenAt = useRef(0);
 
-  const feed: FeedView | undefined = snapshot?.feed;
-  const now = Date.now();
+  useEffect(() => {
+    const incoming = snapshot?.feed;
+    if (!incoming) return;
+    const at = Date.now();
+    if (view === null || at - takenAt.current >= REFRESH_MS) {
+      takenAt.current = at;
+      setView({ feed: incoming, at });
+    }
+  }, [snapshot, view]);
+
+  const feed: FeedView | undefined = view?.feed;
+  const now = view?.at ?? Date.now();
 
   useEffect(() => {
     try {
@@ -425,7 +445,9 @@ export function FeedScreen({ token, snapshot }: { token: string; snapshot: Snaps
 
   const { feedGroups, radarGroups, manualGroups, hiddenRows } = useMemo(() => {
     const number = (value: string, fallback: number) => (value.trim() === "" ? fallback : Number(value));
+    const roiMin = number(filters.roiMin, -Infinity);
     const roiMax = number(filters.roiMax, Infinity);
+    const watched = new Set(filters.exchanges);
     const volumeMin = number(filters.volumeMin, 0);
     const capacityMin = number(filters.capacityMin, 0);
     const query = filters.search.trim().toUpperCase();
@@ -444,11 +466,14 @@ export function FeedScreen({ token, snapshot }: { token: string; snapshot: Snaps
       if (row.block !== null && row.block !== "no_book") return drop(row.block.split(":")[0]);
       // The minimum is the terminal's feed threshold; the maximum filters out fake gaps of different assets.
       if (Number(row.roi_net_pct ?? -Infinity) > roiMax) return drop("профит выше максимума");
+      if (roiMin > -Infinity && Number(row.roi_net_pct ?? -Infinity) < roiMin) return drop("профит ниже минимума");
       if (row.volume24h_weak_usd !== null && Number(row.volume24h_weak_usd) < volumeMin) return drop("мал объём 24ч");
       if (capacityMin && Number(row.capacity_usd ?? 0) < capacityMin) return drop("мала глубина");
       if (!filters.showSuspicious && row.suspicious) return drop("подозрительные");
-      if (filters.longExchange && row.long?.exchange !== filters.longExchange) return false;
-      if (filters.shortExchange && row.short?.exchange !== filters.shortExchange) return false;
+      // Both legs must be on watched exchanges: a pair is only useful when you would trade on either side of it.
+      if (watched.size > 0 && !(watched.has(row.long?.exchange ?? "") && watched.has(row.short?.exchange ?? ""))) {
+        return drop("биржа не выбрана");
+      }
       if (!filters.showReadOnly && (READ_ONLY.has(row.long?.exchange ?? "") || READ_ONLY.has(row.short?.exchange ?? ""))) {
         return drop("без торговли");
       }
@@ -499,81 +524,109 @@ export function FeedScreen({ token, snapshot }: { token: string; snapshot: Snaps
   return (
     <div className="gaps">
       <section className="feed" onMouseEnter={() => setHolding(true)} onMouseLeave={() => setHolding(false)}>
-        <div className="toolbar filters feed-filters">
-          <label title="строки с профитом выше — почти всегда разные монеты под одним тикером">
-            профит ≤{" "}
+        <div className="filter-panel">
+          <div className="filter-row">
+            <label title="профит по стакану на твой размер, после комиссий. Ниже минимума строки не показываются">
+              профит{" "}
+              <input
+                className="narrow"
+                placeholder="мин"
+                value={filters.roiMin}
+                inputMode="decimal"
+                onFocus={(event) => event.target.select()}
+                onKeyDown={(event) => event.key === "Escape" && set("roiMin", "")}
+                onChange={(event) => set("roiMin", event.target.value)}
+              />
+              <span className="muted">…</span>
+              <input
+                className="narrow"
+                placeholder="макс"
+                value={filters.roiMax}
+                inputMode="decimal"
+                onFocus={(event) => event.target.select()}
+                onKeyDown={(event) => event.key === "Escape" && set("roiMax", "")}
+                onChange={(event) => set("roiMax", event.target.value)}
+              />
+              %
+            </label>
+            <label title="оборот за сутки по слабой ноге. Отсекает мёртвые контракты, но глубина говорит о размере точнее">
+              объём 24ч ≥ ${" "}
+              <input
+                value={filters.volumeMin}
+                inputMode="decimal"
+                onFocus={(event) => event.target.select()}
+                onKeyDown={(event) => event.key === "Escape" && set("volumeMin", "")}
+                onChange={(event) => set("volumeMin", event.target.value)}
+              />
+            </label>
+            <label title="сколько долларов на ногу выдерживают стаканы, пока профит выше порога. Прямая мера того, возьмётся ли твой размер — в отличие от объёма за сутки. Ставь свой размер на ногу, а лучше полтора: ёмкость считается по входу, выход бывает тоньше">
+              глубина ≥ ${" "}
+              <input
+                value={filters.capacityMin}
+                placeholder={sizeUsd === "—" ? "" : sizeUsd}
+                inputMode="decimal"
+                onFocus={(event) => event.target.select()}
+                onKeyDown={(event) => event.key === "Escape" && set("capacityMin", "")}
+                onChange={(event) => set("capacityMin", event.target.value)}
+              />
+            </label>
             <input
-              value={filters.roiMax}
-              inputMode="decimal"
-              onFocus={(event) => event.target.select()}
-              onKeyDown={(event) => event.key === "Escape" && set("roiMax", "")}
-              onChange={(event) => set("roiMax", event.target.value)}
+              className="search"
+              placeholder="монета"
+              value={filters.search}
+              onKeyDown={(event) => event.key === "Escape" && set("search", "")}
+              onChange={(event) => set("search", event.target.value)}
             />
-            %
-          </label>
-          <label>
-            объём 24ч ≥ ${" "}
-            <input
-              value={filters.volumeMin}
-              inputMode="decimal"
-              onFocus={(event) => event.target.select()}
-              onKeyDown={(event) => event.key === "Escape" && set("volumeMin", "")}
-              onChange={(event) => set("volumeMin", event.target.value)}
-            />
-          </label>
-          <label title="сколько долларов на ногу выдерживают стаканы, пока профит выше порога. Прямая мера того, возьмётся ли твой размер — в отличие от объёма за сутки. Ставь свой размер на ногу, а лучше полтора: ёмкость считается по входу, выход бывает тоньше">
-            глубина ≥ ${" "}
-            <input
-              value={filters.capacityMin}
-              placeholder={sizeUsd === "—" ? "" : sizeUsd}
-              inputMode="decimal"
-              onFocus={(event) => event.target.select()}
-              onKeyDown={(event) => event.key === "Escape" && set("capacityMin", "")}
-              onChange={(event) => set("capacityMin", event.target.value)}
-            />
-          </label>
-          <span className="muted">показывать:</span>
-          <label
-            className="check-label"
-            title="Индексы бирж расходятся больше чем на 1 % — вероятно, под одним тикером разные монеты или сломан множитель. Снимите галочку, чтобы убрать такие вилки из ленты."
-          >
-            <input type="checkbox" checked={filters.showSuspicious} onChange={(event) => set("showSuspicious", event.target.checked)} />{" "}
-            подозрительные
-          </label>
-          <label
-            className="check-label"
-            title="Вилки, где хотя бы одна нога на бирже без торгового API (Variational). Их видно и считает, но кнопка «Открыть» для них не работает. Снимите галочку, чтобы убрать их из ленты."
-          >
-            <input type="checkbox" checked={filters.showReadOnly} onChange={(event) => set("showReadOnly", event.target.checked)} />{" "}
-            без торговли
-          </label>
-          <select value={filters.longExchange} onChange={(event) => set("longExchange", event.target.value)}>
-            <option value="">лонг: все</option>
-            {exchanges.map((name) => (
-              <option key={name} value={name}>
-                лонг {name.toUpperCase()}
-              </option>
-            ))}
-          </select>
-          <select value={filters.shortExchange} onChange={(event) => set("shortExchange", event.target.value)}>
-            <option value="">шорт: все</option>
-            {exchanges.map((name) => (
-              <option key={name} value={name}>
-                шорт {name.toUpperCase()}
-              </option>
-            ))}
-          </select>
-          <input
-            placeholder="монета"
-            value={filters.search}
-            onKeyDown={(event) => event.key === "Escape" && set("search", "")}
-            onChange={(event) => set("search", event.target.value)}
-          />
-          {touched && (
-            <button className="action" type="button" onClick={() => setFilters({ ...DEFAULT_FILTERS, sort: filters.sort })}>
-              [СБРОС ФИЛЬТРОВ]
+          </div>
+
+          <div className="filter-row">
+            <span className="muted">показывать:</span>
+            <label
+              className="check-label"
+              title="Индексы бирж расходятся больше чем на 1 % — вероятно, под одним тикером разные монеты или сломан множитель. Снимите галочку, чтобы убрать такие вилки из ленты."
+            >
+              <input type="checkbox" checked={filters.showSuspicious} onChange={(event) => set("showSuspicious", event.target.checked)} />{" "}
+              подозрительные
+            </label>
+            <label
+              className="check-label"
+              title="Вилки, где хотя бы одна нога на бирже без торгового API. Их видно и считает, но кнопка «Открыть» для них не работает."
+            >
+              <input type="checkbox" checked={filters.showReadOnly} onChange={(event) => set("showReadOnly", event.target.checked)} />{" "}
+              без торговли
+            </label>
+            {touched && (
+              <button className="action" type="button" onClick={() => setFilters({ ...DEFAULT_FILTERS, sort: filters.sort })}>
+                [СБРОС ФИЛЬТРОВ]
+              </button>
+            )}
+          </div>
+
+          <div className="filter-row" title="какие биржи смотрим. Пара попадает в ленту, только если обе её ноги на отмеченных биржах. Ничего не отмечено — смотрим все">
+            <span className="muted">биржи:</span>
+            <button
+              className={filters.exchanges.length === 0 ? "tab active" : "tab"}
+              type="button"
+              onClick={() => set("exchanges", [])}
+            >
+              все
             </button>
-          )}
+            {exchanges.map((name) => {
+              const on = filters.exchanges.includes(name);
+              return (
+                <label key={name} className="check-label">
+                  <input
+                    type="checkbox"
+                    checked={on}
+                    onChange={() =>
+                      set("exchanges", on ? filters.exchanges.filter((item) => item !== name) : [...filters.exchanges, name])
+                    }
+                  />{" "}
+                  {name.toUpperCase()}
+                </label>
+              );
+            })}
+          </div>
         </div>
         <div className="toolbar muted">
           <SettingsForm
@@ -583,6 +636,9 @@ export function FeedScreen({ token, snapshot }: { token: string; snapshot: Snaps
             enterAfterMs={settings?.enter_after_ms}
             horizonH={settings?.funding_horizon_h}
           />
+          <span className="taken-at" title={`таблица берёт снимок раз в ${REFRESH_MS / 1000} с, чтобы строки не дёргались. Это время — когда взят показанный снимок`}>
+            данные {clock(now)}
+          </span>
           <span className="sort-buttons">
             сорт:
             {(["total", "profit"] as SortKey[]).map((value) => (
@@ -593,40 +649,42 @@ export function FeedScreen({ token, snapshot }: { token: string; snapshot: Snaps
           </span>
         </div>
 
-        {feedGroups.length > 0 && <GapTable groups={inHeldOrder(feedGroups, "feed")} scope="feed" {...common} />}
-        {feedGroups.length === 0 && (
-          <p className="empty muted">
-            {feed ? `Сейчас нет вилок выше порога дольше ${Math.round(enterAfterMs / 1000)} с.` : "Лента запускается…"}
-          </p>
-        )}
-        {hiddenRows.length > 0 && (
-          <p className="empty muted" title="строки, которые терминал посчитал, но не показал. «мало глубины» и «больше макс. ордера» зависят от размера на ногу: уменьшите его, и часть строк вернётся">
-            скрыто {hiddenRows.reduce((sum, [, count]) => sum + count, 0)}:{" "}
-            {hiddenRows.map(([reason, count]) => `${reasonText(reason)} ${count}`).join(" · ")}
-          </p>
-        )}
-        {tradeMessage && (
-          <p className={tradeMessage.startsWith("✓") ? "empty" : "empty level-warning"} onClick={() => setTradeMessage(null)}>
-            {tradeMessage}
-          </p>
-        )}
-        {snapshot?.trading && !snapshot.trading.enabled && (
-          <p className="empty muted">Торговля выключена: включается в config.toml, раздел [trading], после пробной сделки.</p>
-        )}
+        <div className="feed-pane">
+          {feedGroups.length > 0 && <GapTable groups={inHeldOrder(feedGroups, "feed")} scope="feed" {...common} />}
+          {feedGroups.length === 0 && (
+            <p className="empty muted">
+              {feed ? `Сейчас нет вилок выше порога дольше ${Math.round(enterAfterMs / 1000)} с.` : "Лента запускается…"}
+            </p>
+          )}
+          {hiddenRows.length > 0 && (
+            <p className="empty muted" title="строки, которые терминал посчитал, но не показал. «мало глубины» и «больше макс. ордера» зависят от размера на ногу: уменьшите его, и часть строк вернётся">
+              скрыто {hiddenRows.reduce((sum, [, count]) => sum + count, 0)}:{" "}
+              {hiddenRows.map(([reason, count]) => `${reasonText(reason)} ${count}`).join(" · ")}
+            </p>
+          )}
+          {tradeMessage && (
+            <p className={tradeMessage.startsWith("✓") ? "empty" : "empty level-warning"} onClick={() => setTradeMessage(null)}>
+              {tradeMessage}
+            </p>
+          )}
+          {snapshot?.trading && !snapshot.trading.enabled && (
+            <p className="empty muted">Торговля выключена: включается в config.toml, раздел [trading], после пробной сделки.</p>
+          )}
+        </div>
 
         {radarGroups.length > 0 && (
-          <>
+          <div className="feed-pane">
             <div className="toolbar section-title">
               <span>
                 <span className="chip">РАДАР</span> <span className="muted">лучшие спреды сейчас, ниже порога ленты</span>
               </span>
             </div>
             <GapTable groups={inHeldOrder(radarGroups, "radar")} scope="radar" {...common} />
-          </>
+          </div>
         )}
 
         {manualGroups.length > 0 && (
-          <>
+          <div className="feed-pane">
             <div className="toolbar section-title">
               <span>
                 <span className="chip">ТОЛЬКО РУКАМИ</span>{" "}
@@ -634,7 +692,7 @@ export function FeedScreen({ token, snapshot }: { token: string; snapshot: Snaps
               </span>
             </div>
             <GapTable groups={inHeldOrder(manualGroups, "manual")} scope="manual" {...common} />
-          </>
+          </div>
         )}
       </section>
       <PortfolioColumn token={token} snapshot={snapshot} />

@@ -163,6 +163,7 @@ class PriceGapEngine:
         self._rules = EpisodeRules(
             min_roi_net_pct=settings.min_roi_pct,
             enter_after_ms=settings.enter_after_ms,
+            enter_min_samples=settings.enter_min_samples,
             fast_enter_multiple=settings.fast_enter_multiple,
             fast_enter_after_ms=settings.fast_enter_after_ms,
             exit_hysteresis_pct=settings.exit_hysteresis_pct,
@@ -755,6 +756,7 @@ class PriceGapEngine:
         self._rules = EpisodeRules(
             min_roi_net_pct=settings.min_roi_pct,
             enter_after_ms=settings.enter_after_ms,
+            enter_min_samples=settings.enter_min_samples,
             fast_enter_multiple=settings.fast_enter_multiple,
             fast_enter_after_ms=settings.fast_enter_after_ms,
             exit_hysteresis_pct=settings.exit_hysteresis_pct,

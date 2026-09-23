@@ -117,6 +117,58 @@ button:disabled {
   text-transform: uppercase;
 }
 
+/* The filters are a block of their own, not a line of the table: a rule and a little air set them apart. */
+.filter-panel {
+  border-bottom: 1px solid var(--line);
+  padding: 0.5rem 1rem 0.6rem;
+}
+
+.filter-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem 1.25rem;
+}
+
+.filter-row + .filter-row {
+  margin-top: 0.45rem;
+}
+
+.filter-row input.narrow {
+  width: 4.5rem;
+}
+
+.filter-row input.search {
+  margin-left: auto;
+  width: 10rem;
+}
+
+/* When the table was last read off the socket: it is ten seconds old at most, and says so rather than pretending. */
+.taken-at {
+  margin-left: 1.25rem;
+  color: var(--muted);
+}
+
+/* Rows carry money and are read one at a time; the cramped default left the screen dense and hard to scan. */
+.grid td,
+.grid th {
+  padding-top: 0.32rem;
+  padding-bottom: 0.32rem;
+}
+
+/* The feed and the radar share the height evenly, each scrolling on its own, instead of one squeezing the other. */
+.feed {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.feed-pane {
+  flex: 1 1 0;
+  min-height: 0;
+  overflow: auto;
+}
+
 /* A key word in a plain rectangle: no radius, no fill, no colour — the style allows none of the three. */
 .chip {
   display: inline-block;
@@ -176,13 +228,14 @@ a.chip:hover {
 
 .gaps {
   display: grid;
-  grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
+  /* The open pairs are a short list; the feed is the screen. Was 3:2, which left the right column half empty. */
+  grid-template-columns: minmax(0, 7fr) minmax(0, 3fr);
   height: 100%;
 }
 
 .feed {
   border-right: 1px solid var(--line);
-  overflow: auto;
+  overflow: hidden;
 }
 
 .pairs {

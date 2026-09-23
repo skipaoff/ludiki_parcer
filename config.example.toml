@@ -90,7 +90,9 @@ fresh_ms = 1000                 # a leg whose book changed longer ago than this 
 quiet_book_max_ms = 10000       # ...unless the exchange's best prices, received after the book, still match it: books are pushed only on change
 resubscribe_after_ms = 5000     # no book this long after subscribing, or older than quiet_book_max_ms: subscribe again
 tick_ms = 200
-enter_after_ms = 45000          # a gap near the threshold must live this long (dips under 2 s tolerated) before the feed
+enter_after_ms = 30000          # a gap near the threshold must live this long (dips under 2 s tolerated) before the feed
+enter_min_samples = 5           # ...and be measured above the threshold this many times. Time alone lets a pair whose
+                                # books went quiet ride out the wait on one lucky reading; readings prove a live market
 # The wait proves a gap can be clicked, not that it is real: index agreement, depth and the weaker leg's volume do that.
 # A gap far above the threshold is both the one worth taking and the one that converges fastest, so it waits less.
 fast_enter_multiple = 4         # at this many times min_roi_pct (4 × 0.50 % = 2 %)...
