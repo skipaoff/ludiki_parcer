@@ -1,4 +1,4 @@
-﻿// VFP: The Gaps screen — one line per coin with its most interesting pair (long, short, profit on the size after book and fees, funding, expected result, interest), the coin's other pairs on click, the radar below the feed and the open-pairs column.
+// VFP: The Gaps screen — one line per coin with its most interesting pair (long, short, profit on the size after book and fees, funding, expected result, interest), the coin's other pairs on click, the radar below the feed and the open-pairs column.
 // Changes when: feed columns, grouping, row states, filters or the radar presentation change (PLAN.md, section 3.1).
 // Anti-goal:
 // 1. Recomputing trading numbers in the browser — the terminal computes; the screen filters, groups and sorts.
@@ -35,14 +35,16 @@ interface Filters {
 const DEFAULT_FILTERS: Filters = {
   roiMin: "",
   roiMax: "15",
-  // A million hid the market this terminal is for. Measured 22.09.2026 at $1000 a leg: of the four pairs that
-  // survived it, none could absorb the size, while every pair that could sat between 50k and 250k of daily volume.
-  // Gaps live where the volume is modest — the liquid majors are arbitraged away in seconds. Depth, not volume,
-  // is what says whether a size can be filled, so this threshold only throws out contracts that barely trade.
-  volumeMin: "50000",
+  // Measured over 840 recorded gaps (23.09.2026): daily volume barely predicts whether a size fits. 68 % of pairs
+  // under 50k could carry $1000 against 71 % of pairs over 1M. Of the 26 gaps that would actually have paid, the
+  // second best — DELTA on gate/bingx, +2.07 % — traded 29,692 a day and a 50k floor would have hidden it.
+  // This threshold only removes contracts that barely trade; depth is what decides whether the size fits.
+  volumeMin: "20000",
   capacityMin: "",
   showSuspicious: false,
-  showReadOnly: true,
+  // Off by default: of the 71 recorded gaps above 2 %, 43 had a Variational leg and not one of them could be
+  // opened. They crowded the top of the screen with numbers nobody can take.
+  showReadOnly: false,
   exchanges: [],
   search: "",
   sort: "total",
@@ -449,7 +451,9 @@ export function FeedScreen({ token, snapshot }: { token: string; snapshot: Snaps
     const roiMax = number(filters.roiMax, Infinity);
     const watched = new Set(filters.exchanges);
     const volumeMin = number(filters.volumeMin, 0);
-    const capacityMin = number(filters.capacityMin, 0);
+    // An empty depth field means the size per leg, as the plan has it: the point of the filter is "will my size
+    // fit", and every one of the 26 gaps that would have paid carried at least $1256.
+    const capacityMin = number(filters.capacityMin, Number(sizeUsd) || 0);
     const query = filters.search.trim().toUpperCase();
     // Hidden rows are counted by reason: a screen that silently drops half the market cannot be trusted,
     // and the reason is usually the size — a book that carries $100 a leg may not carry $2000.
@@ -496,7 +500,7 @@ export function FeedScreen({ token, snapshot }: { token: string; snapshot: Snaps
       manualGroups: groupByToken(manualRows, filters.sort),
       hiddenRows: [...hidden.entries()].sort((a, b) => b[1] - a[1]),
     };
-  }, [feed, filters, minRoi]);
+  }, [feed, filters, minRoi, sizeUsd]);
 
   // Remember the order the screen is showing, but only while the cursor is away from it.
   useEffect(() => {

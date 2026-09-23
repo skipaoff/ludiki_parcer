@@ -1,4 +1,4 @@
-﻿from decimal import Decimal
+from decimal import Decimal
 
 from app.core.episodes import EpisodeRules, EventKind, Phase, Sample, end, step
 from tests.core.helpers import D

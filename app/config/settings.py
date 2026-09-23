@@ -149,7 +149,7 @@ class InstrumentsSettings(_Section):
 
 class FeedSettings(_Section):
     size_usd: Decimal = Field(default=Decimal("100"), gt=0)
-    min_roi_pct: Decimal = Decimal("0.50")
+    min_roi_pct: Decimal = Decimal("1.00")
     candidate_margin_pct: Decimal = Field(default=Decimal("0.50"), ge=0)
     book_limit: int = Field(default=60, ge=2, le=200)
     tracking_limit: int = Field(default=20, ge=0, le=200)
@@ -161,7 +161,7 @@ class FeedSettings(_Section):
     tick_ms: int = Field(default=200, ge=50)
     enter_after_ms: int = Field(default=30000, ge=0)
     enter_min_samples: int = Field(default=5, ge=1)
-    fast_enter_multiple: Decimal = Field(default=Decimal(4), ge=0)
+    fast_enter_multiple: Decimal = Field(default=Decimal(2), ge=0)
     fast_enter_after_ms: int = Field(default=5000, ge=0)
     exit_hysteresis_pct: Decimal = Field(default=Decimal("0.10"), ge=0)
     exit_after_ms: int = Field(default=2000, ge=0)
@@ -210,7 +210,7 @@ class TradingSettings(_Section):
     def leverage(self, exchange: str) -> int:
         return getattr(self, f"leverage_{exchange}", 1)
     isolated: bool = True
-    entry_min_roi_pct: Decimal = Decimal("0.50")
+    entry_min_roi_pct: Decimal = Decimal("1.00")
     max_open_pairs: int = Field(default=3, ge=1, le=50)
     max_total_usd: Decimal = Field(default=Decimal("5000"), gt=0)
     one_pair_per_token: bool = True

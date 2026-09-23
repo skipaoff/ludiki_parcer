@@ -1,4 +1,4 @@
-﻿"""
+"""
 VFP: Every tick, turns live market data into the gap feed — best-price radar over all pairs, order books for candidates, book-based ROI, capacity, exit spread, funding over the horizon, expected result and interest, and the lifecycle of each gap.
 Changes when: how gaps are found, measured or presented changes (PLAN.md, sections 5, 7 and 8).
 Anti-goal:

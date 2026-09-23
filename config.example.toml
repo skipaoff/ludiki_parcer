@@ -80,7 +80,10 @@ max_index_gap_pct = 1       # wider index gap marks the pair suspicious until ve
 
 [feed]
 size_usd = 100                  # size per leg; converted into the same token count on both exchanges
-min_roi_pct = 0.50              # net ROI by book, after round-trip taker fees, to enter the feed
+min_roi_pct = 1.00              # net ROI by book, after round-trip taker fees, to enter the feed.
+                                # Measured over 840 recorded gaps (23.09.2026): below 1 % only 3 in 100 would have
+                                # paid even at the best possible exit, and they were three quarters of the flow.
+                                # Above 2 %, 69 in 100 would have paid. The radar still shows what is below.
 candidate_margin_pct = 0.50     # pairs this close to the threshold by best prices get order-book subscriptions
 book_limit = 60                 # pairs with live order books at once
 tracking_limit = 20             # of those, at most this many follow gaps that left the feed until prices converge
@@ -95,7 +98,7 @@ enter_min_samples = 5           # ...and be measured above the threshold this ma
                                 # books went quiet ride out the wait on one lucky reading; readings prove a live market
 # The wait proves a gap can be clicked, not that it is real: index agreement, depth and the weaker leg's volume do that.
 # A gap far above the threshold is both the one worth taking and the one that converges fastest, so it waits less.
-fast_enter_multiple = 4         # at this many times min_roi_pct (4 × 0.50 % = 2 %)...
+fast_enter_multiple = 2         # at this many times min_roi_pct (2 × 1.00 % = 2 %)...
 fast_enter_after_ms = 5000      # ...the gap only has to hold this long. 0 in the multiple turns the fast path off
 exit_hysteresis_pct = 0.10
 exit_after_ms = 2000
@@ -138,7 +141,7 @@ leverage_bitget = 3
 leverage_kucoin = 3
 leverage_hyperliquid = 3
 isolated = true                 # isolated margin on both legs; false means cross
-entry_min_roi_pct = 0.50        # net ROI by book at the moment of the click; below it no orders leave
+entry_min_roi_pct = 1.00        # net ROI by book at the moment of the click; below it no orders leave
 max_open_pairs = 3
 max_total_usd = 5000            # notional per leg summed over open pairs
 one_pair_per_token = true

@@ -106,8 +106,10 @@ def test_gap_enters_the_feed_after_holding_above_threshold():
     assert row["lifetime_ms"] == 400  # counted from the first sighting, not from entering the feed
 
 
-def test_default_45_second_rule_keeps_short_gaps_out_and_their_books_in():
-    engine, state, clock, binance, mexc, _ = build(sol_record(), enter_after_ms=45_000)
+def test_a_long_wait_keeps_short_gaps_out_and_their_books_in():
+    # fast_enter_multiple=0 turns the fast path off: this test is about the plain wait, and the gap it pushes
+    # sits right on the fast band, so the two rules would otherwise overlap.
+    engine, state, clock, binance, mexc, _ = build(sol_record(), enter_after_ms=45_000, fast_enter_multiple=Decimal(0))
     engine.tick()
     for _ in range(44):
         push_market(state)
