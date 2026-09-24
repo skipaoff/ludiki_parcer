@@ -1,5 +1,5 @@
 """
-VFP: Reads and writes secrets in the OS credential store (Windows Credential Manager) and shows them only masked.
+VFP: Reads and writes secrets in the OS credential store (Windows Credential Manager, macOS keychain) and shows them only masked.
 Changes when: a new kind of secret appears or the credential store changes.
 Anti-goal:
 1. Secrets in files, the database, logs or API responses — only this module touches raw values.

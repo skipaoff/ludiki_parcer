@@ -3,3 +3,5 @@
 *.bat text eol=crlf
 *.sql text eol=lf
 *.py text eol=lf
+# A CRLF here would reach macOS as "bad interpreter: /usr/bin/env bash\r".
+*.sh text eol=lf
