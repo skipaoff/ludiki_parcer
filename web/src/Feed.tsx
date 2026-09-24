@@ -722,7 +722,7 @@ export function FeedScreen({ token, snapshot }: { token: string; snapshot: Snaps
               title={
                 "строки, которые терминал посчитал, но не показал:\n" +
                 hiddenRows.map(([reason, count]) => `${count} — ${reasonText(reason)}`).join("\n") +
-                "\n\nглубина и максимум ордера зависят от размера на ногу: уменьшите его, и часть строк вернётся"
+                "\n\nглубина считается на размер сделки: уменьшите его, и часть строк вернётся"
               }
             >
               скрыто {hiddenRows.reduce((sum, [, count]) => sum + count, 0)}

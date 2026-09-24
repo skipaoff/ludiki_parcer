@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import shutil
 import subprocess
 from pathlib import Path
 from typing import Any, Callable
@@ -168,8 +169,14 @@ class Database:
             return
         pg_ctl = self._settings.pg_bin_dir / ("pg_ctl.exe" if (self._settings.pg_bin_dir / "pg_ctl.exe").exists() else "pg_ctl")
         if not pg_ctl.exists():
-            log.warning("pg_ctl not found in %s, not starting the cluster", self._settings.pg_bin_dir)
-            return
+            # The configured directory is the Windows one by default; elsewhere the binaries are wherever the
+            # package manager put them, and PATH is the one place worth looking before giving up.
+            found = shutil.which("pg_ctl")
+            if found is None:
+                log.warning("pg_ctl not found in %s or on PATH, not starting the cluster", self._settings.pg_bin_dir)
+                return
+            log.info("pg_ctl taken from PATH: %s", found)
+            pg_ctl = Path(found)
         data_dir = str(self._settings.pg_data_dir)
         status = await asyncio.to_thread(_run, [str(pg_ctl), "status", "-D", data_dir])
         if status == 0:
