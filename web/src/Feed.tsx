@@ -26,6 +26,7 @@ interface Filters {
   capacityMin: string;
   showSuspicious: boolean;
   showReadOnly: boolean;
+  showLongStanding: boolean;
   /** Exchanges to watch. Empty means every one of them; a row passes when both its legs are here. */
   exchanges: string[];
   search: string;
@@ -45,10 +46,17 @@ const DEFAULT_FILTERS: Filters = {
   // Off by default: of the 71 recorded gaps above 2 %, 43 had a Variational leg and not one of them could be
   // opened. They crowded the top of the screen with numbers nobody can take.
   showReadOnly: false,
+  // Off by default. Of 941 recorded gaps (25.09.2026) the median left the feed after 171 s and nine in ten
+  // within 25 minutes; what stays longer does not converge at all. PENG on mexc/bybit stood 15 hours across
+  // 43 appearances since 21.09 and never closed. Such a discrepancy is the state of the market, not news.
+  showLongStanding: false,
   exchanges: [],
   search: "",
   sort: "total",
 };
+
+/** A gap in the feed longer than this is a standing discrepancy: past the 90th percentile of everything recorded. */
+const LONG_STANDING_MS = 30 * 60 * 1000;
 
 const READ_ONLY = new Set(["variational"]);
 const SOON_MS = 60 * 60 * 1000;
@@ -75,6 +83,11 @@ interface Group {
   token: string;
   head: FeedRow;
   others: FeedRow[];
+}
+
+function ageText(ms: number): string {
+  const minutes = Math.round(ms / 60_000);
+  return minutes < 90 ? `${minutes} мин` : `${Math.round(minutes / 60)} ч`;
 }
 
 function groupByToken(rows: FeedRow[], sort: SortKey, headCandidates: (row: FeedRow) => boolean = () => true): Group[] {
@@ -370,6 +383,12 @@ function GapLine({
           row.token
         )}
         {row.suspicious ? " ?" : ""}
+        {row.in_feed_ms !== null && row.in_feed_ms > LONG_STANDING_MS && (
+          // A gap this old is the state of the market rather than a chance: it is shown with its age.
+          <span className="chip chip-note" title="столько эта вилка стоит в ленте — такие обычно не сходятся">
+            {ageText(row.in_feed_ms)}
+          </span>
+        )}
       </td>
       <td className="left">
         <Leg leg={row.long} />
@@ -547,6 +566,7 @@ export function FeedScreen({ token, snapshot }: { token: string; snapshot: Snaps
       if (watched.size > 0 && !(watched.has(row.long?.exchange ?? "") && watched.has(row.short?.exchange ?? ""))) {
         return drop("биржа не выбрана");
       }
+      if (!filters.showLongStanding && row.in_feed_ms !== null && row.in_feed_ms > LONG_STANDING_MS) return drop("давно висят");
       if (!filters.showReadOnly && (READ_ONLY.has(row.long?.exchange ?? "") || READ_ONLY.has(row.short?.exchange ?? ""))) {
         return drop("без торговли");
       }
@@ -670,6 +690,13 @@ export function FeedScreen({ token, snapshot }: { token: string; snapshot: Snaps
             >
               <input type="checkbox" checked={filters.showReadOnly} onChange={(event) => set("showReadOnly", event.target.checked)} />{" "}
               без торговли
+            </label>
+            <label
+              className="check-label"
+              title="Вилки, которые держатся в ленте дольше получаса. Из 941 записанной вилки половина уходила за три минуты, девять из десяти — за 25; то, что стоит дольше, обычно не сходится вовсе: разные индексы, закрытые переводы, акции вне торговой сессии."
+            >
+              <input type="checkbox" checked={filters.showLongStanding} onChange={(event) => set("showLongStanding", event.target.checked)} />{" "}
+              давно висят
             </label>
             <span
               className="muted"

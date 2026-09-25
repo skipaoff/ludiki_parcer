@@ -128,6 +128,8 @@ export interface FeedRow {
   capacity_usd: string | null;
   phase: "candidate" | "in_feed" | "tracking" | null;
   lifetime_ms: number | null;
+  /** How long the gap has been in the feed; a discrepancy standing for hours is not news. */
+  in_feed_ms: number | null;
   volume24h_weak_usd: string | null;
   suspicious: boolean;
   /** A leg the exchange refuses orders on through the API: the gap is real, only the button cannot take it. */

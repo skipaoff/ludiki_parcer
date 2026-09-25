@@ -585,6 +585,9 @@ class PriceGapEngine:
         # and the money columns are that size's money, not the one asked for.
         size = (quote.size_usd if quote and quote.size_usd else None) or self._settings.size_usd
         lifetime_ms = int(now - episode.detected_ms) if episode else None
+        # How long this gap has been in the feed, counted from its first entry: a discrepancy that has stood
+        # for hours is not news, and the screen sorts those out by this number.
+        in_feed_ms = int(now - episode.first_entered_feed_ms) if episode and episode.first_entered_feed_ms is not None else None
         profit_pct = quote.roi_net_pct if quote else None
         # Expected result: the spread after book and fees if prices converge, plus funding over the horizon.
         total_pct = None if profit_pct is None else profit_pct + (funding.horizon_pct if funding else Decimal(0))
@@ -612,6 +615,7 @@ class PriceGapEngine:
             "phase": episode.phase.value if episode else None,
             # Counted from the moment the gap appeared, so a feed row shows at least the required minimum lifetime.
             "lifetime_ms": lifetime_ms,
+            "in_feed_ms": in_feed_ms,
             "volume24h_weak_usd": _text(assessment.volume24h_weak_usd, 6),
             "suspicious": record.suspicious,
             "manual_only": record.manual_only,
