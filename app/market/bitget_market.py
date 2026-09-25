@@ -16,6 +16,7 @@ from typing import Any, Iterable
 import aiohttp
 import orjson
 
+from app.system.tls import client_session
 from app.market.depth_pool import DepthPool, Poller
 from app.market.state import MarketState
 
@@ -40,7 +41,6 @@ def handle_frame(state: MarketState, raw: str | bytes) -> None:
     if arg.get("channel") != CHANNEL or not message.get("data"):
         return
     data = message["data"][0]
-    state.count(EXCHANGE)
     state.set_book(EXCHANGE, arg["instId"], data.get("bids") or [], data.get("asks") or [], int(data.get("ts") or message.get("ts") or 0))
 
 
@@ -84,12 +84,11 @@ class BitgetMarket:
             if bid > 0 and ask > 0:
                 self._state.set_top(EXCHANGE, symbol, bid, ask, now)
             self._state.set_mark(EXCHANGE, symbol, mark, index, volume)
-        self._state.count(EXCHANGE)
 
     async def run(self) -> None:
         self._pool.start()
         try:
-            async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=5)) as session:
+            async with client_session(timeout=aiohttp.ClientTimeout(total=5)) as session:
                 self._session = session
                 await self._poller.run()
         finally:

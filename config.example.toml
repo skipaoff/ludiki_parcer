@@ -1,5 +1,6 @@
 # Terminal ludik — non-secret settings.
-# Copy to config.toml and edit. API keys and passwords never go here: they live in Windows Credential Manager.
+# Copy to config.toml and edit. API keys and passwords never go here: they live in the credential store of the
+# system — Credential Manager on Windows, the login keychain on macOS.
 # Relative paths are resolved against the folder of this file.
 
 [server]
@@ -20,7 +21,7 @@ port = 5432
 name = "ludik"
 user = "ludik"
 autostart = true            # start the local cluster with pg_ctl when it is not running
-pg_bin_dir = "../ludik-data/pgsql/bin"
+pg_bin_dir = "../ludik-data/pgsql/bin"   # Windows bundle; if it is not there, PATH and the Homebrew prefixes are searched
 pg_data_dir = "../ludik-data/pgdata"
 connect_timeout_s = 5
 
@@ -103,7 +104,9 @@ fast_enter_after_ms = 5000      # ...the gap only has to hold this long. 0 in th
 exit_hysteresis_pct = 0.10
 exit_after_ms = 2000
 default_taker_fee_binance_pct = 0.05   # used until an accepted key check reports the account rate
-default_taker_fee_mexc_pct = 0.05
+default_taker_fee_mexc_pct = 0.08     # API-торговля на MEXC тарифицируется отдельно: 0,05% на запуске,
+                                      # 0,06% с 01.05.2026, 0,08% с 01.06.2026. Ставка аккаунта, если биржа её
+                                      # отдаст после проверки ключа, заменяет это значение
 default_taker_fee_gate_pct = 0.075     # Gate contract default taker rate
 default_taker_fee_aster_pct = 0.035    # Aster Pro taker rate
 default_taker_fee_bingx_pct = 0.05     # BingX contract default taker rate
@@ -148,6 +151,8 @@ one_pair_per_token = true
 margin_buffer_pct = 20          # free margin must cover size / leverage plus this buffer on each exchange
 status_query_attempts = 10      # an order with unknown outcome is queried this many times...
 status_query_interval_ms = 1000 # ...this far apart, before the pair stays "opening" with an alarm
+fast_trading = true             # one click opens or closes a pair. false asks for confirmation first;
+                                # the switch is also in Настройки → Торговля and applies without a restart
 close_attempts = 3
 close_retry_pause_ms = 300
 maintenance_block_s = 60        # after a maintenance answer the exchange is blocked for new pairs this long

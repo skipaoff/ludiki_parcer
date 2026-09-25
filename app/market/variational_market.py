@@ -60,7 +60,6 @@ class VariationalMarket:
             try:
                 stats = await self._adapter().stats()
                 self.listings = apply_stats(self._state, stats, time.time() * 1000)
-                self._state.count(EXCHANGE)
                 self.polls += 1
             except asyncio.CancelledError:
                 raise

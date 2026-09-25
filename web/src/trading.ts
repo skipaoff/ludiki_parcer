@@ -2,8 +2,10 @@
 // Changes when: a trading action or a pre-trade reason is added.
 // Anti-goal:
 // 1. Retrying an order action by itself — every click is one request; the terminal decides what happens next.
+// 2. Asking twice, or asking when fast trading is on: the switch is the user's answer, given once in the settings.
 
 import { apiSend } from "./session";
+import type { TradingStatus } from "./types";
 
 const REASONS: Record<string, string> = {
   trading_disabled: "торговля выключена в config.toml ([trading] enabled)",
@@ -65,4 +67,15 @@ export function explainFailure(error: unknown): string {
     // plain text
   }
   return text;
+}
+
+
+/** Fast trading is the default: a missing answer from the terminal must not start asking about every click. */
+export function fastTrading(trading?: TradingStatus | null): boolean {
+  return trading?.settings?.fast_trading !== false;
+}
+
+/** With fast trading off, an order goes out only after the question is answered. */
+export function confirmed(fast: boolean, question: string): boolean {
+  return fast || window.confirm(question);
 }

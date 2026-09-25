@@ -26,6 +26,7 @@ from typing import Any
 import orjson
 import uvicorn
 
+from app.alerts.service import GapAlerts
 from app.api.hub import Hub
 from app.api.server import APP_NAME, ApiContext, create_app
 from app.config.settings import REPO_ROOT, Settings, load_settings
@@ -45,6 +46,7 @@ from app.market.variational_market import VariationalMarket
 from app.market.state import MarketState
 from app.market.radar_recorder import RadarRecorder
 from app.execution.service import ExecutionService
+from app.execution.settings import TradingSettingsService
 from app.market.private_streams import OrderEvents, PrivateStreams
 from app.portfolio.service import PortfolioService
 from app.system.keep_awake import KeepAwake
@@ -206,7 +208,7 @@ async def _serve(
         funding=funding.rate,
     )
     feed_settings = FeedSettingsService(engine, database, journal)
-    radar_recorder = RadarRecorder(instruments, market, writer.submit)
+    radar_recorder = RadarRecorder(instruments, market, writer.submit, funding=funding.rate)
     order_events = OrderEvents()
     execution = ExecutionService(
         settings.trading,
@@ -220,7 +222,11 @@ async def _serve(
         taker_fee_pct,
         balance_max_age_ms=portfolio_settings.balances_poll_s * 2_000 + 5_000,
         order_events=order_events,
+        funding=funding.rate,
     )
+    trading_settings = TradingSettingsService(execution, database, journal)
+    # One announcement per gap that just became clickable; the browser turns it into a notification.
+    alerts = GapAlerts(lambda: execution.annotate(engine.view()["rows"]), journal)
     private_streams = PrivateStreams(
         exchanges.adapter,
         order_events,
@@ -248,6 +254,7 @@ async def _serve(
             return await trades_history.trade_stats(database.pool, flt)
 
     def snapshot() -> dict[str, Any]:
+        view = engine.view()
         return {
             "app": {"version": VERSION, "started_ts_ms": started_ms},
             "database": {
@@ -260,14 +267,19 @@ async def _serve(
             "exchanges": exchanges.snapshot(),
             "instruments": instruments.summary(),
             "feed": {
-                **engine.view(),
-                "rows": execution.annotate(engine.view()["rows"]),
-                "radar": execution.annotate(engine.view()["radar"]),
+                **view,
+                "rows": execution.annotate(view["rows"]),
+                "radar": execution.annotate(view["radar"]),
                 "streams": {name: feed.stats() for name, feed in feeds.items()},
                 "funding": funding.stats(),
             },
             "trading": {**execution.status(), "private_streams": private_streams.connected, "order_events": order_events.received},
-            "history": {"recorded": recorder.recorded, "open": recorder.open_count, "radar_snapshots": radar_recorder.snapshots},
+            "history": {
+                "recorded": recorder.recorded,
+                "open": recorder.open_count,
+                "radar_snapshots": radar_recorder.snapshots,
+                "alerts": alerts.sent,
+            },
             "pairs": {"open": portfolio.open_count, "limit": settings.trading.max_open_pairs, "sleep_blocked": keep_awake.held},
             "portfolio": portfolio.snapshot(),
         }
@@ -295,6 +307,7 @@ async def _serve(
         exchanges=exchanges,
         instruments=instruments,
         feed_settings=feed_settings,
+        trading_settings=trading_settings,
         history=History(),
         portfolio=portfolio,
         execution=execution,
@@ -315,6 +328,7 @@ async def _serve(
     journal.emit(Level.INFO, "app", "started", version=VERSION, pid=os.getpid())
     await writer.flush(force_connect=True)
     await feed_settings.load()
+    await trading_settings.load()
     if database.ready:
         closed = await history_queries.close_dangling_episodes(database.pool)
         if closed:
@@ -336,6 +350,7 @@ async def _serve(
         asyncio.create_task(portfolio.run_metrics()),
         asyncio.create_task(execution.run_warmup()),
         asyncio.create_task(private_streams.run()),
+        asyncio.create_task(alerts.run()),
     ]
     server_task = asyncio.create_task(server.serve())
     try:

@@ -20,14 +20,39 @@ const VERDICT_TEXT: Record<string, string> = {
   no_ip_restriction: "ключ без привязки к IP — у части бирж такие ключи ограничены по сроку",
   no_free_balance: "нет свободного USDT на фьючерсном счёте",
   fees_unknown: "комиссии аккаунта не получены",
-  clock_offset: "часы компьютера расходятся с биржей — включите синхронизацию времени Windows",
+  clock_offset: "часы компьютера расходятся с биржей — включите синхронизацию времени в системе",
 };
 
-// What the two key fields hold on exchanges that do not use a plain API key and secret.
-const KEY_FIELDS: Record<string, { key: string; secret: string; hint: string }> = {
+// Where the key is made, what the two fields hold, and what the exchange demands. Details: docs/KEYS.md.
+const KEY_FIELDS: Record<string, { key: string; secret: string; hint: string; url?: string }> = {
+  binance: {
+    key: "API key",
+    secret: "Secret",
+    url: "https://www.binance.com/en/my/settings/api-management",
+    hint:
+      "Binance: сначала откройте фьючерсный счёт, потом создавайте ключ — к готовому ключу право на фьючерсы уже не добавить. " +
+      "Права: Enable Reading и Enable Futures, без Enable Withdrawals. Привязка к IP обязательна: без неё у ключа остаётся только чтение.",
+  },
+  mexc: {
+    key: "API key",
+    secret: "Secret",
+    url: "https://www.mexc.com/user/openapi",
+    hint:
+      "MEXC: нужен пройденный KYC, права на чтение и торговлю фьючерсами, без вывода и переводов. Ключ без привязки к IP живёт 90 дней. " +
+      "Права ключа MEXC не отдаёт, поэтому проверить вывод за вас терминал не сможет.",
+  },
+  gate: {
+    key: "API key",
+    secret: "Secret",
+    url: "https://www.gate.com/myaccount/apiv4keys",
+    hint:
+      "Gate: ключ APIv4 (не APIv2), строке фьючерсов дать Read and Write, кошельку — не давать. Ключ без привязки к IP живёт 90 дней. " +
+      "Права ключа Gate не отдаёт — проверяйте сами.",
+  },
   aster: {
     key: "Кошелёк",
     secret: "Ключ API-кошелька",
+    url: "https://www.asterdex.com/en/api-wallet",
     hint:
       "Aster подписывает запросы кошельком. «Кошелёк» — адрес основного кошелька (0x…), с которым вы входите на Aster. " +
       "«Ключ API-кошелька» — приватный ключ API-кошелька, созданного для него на asterdex.com/en/api-wallet. " +
@@ -36,11 +61,15 @@ const KEY_FIELDS: Record<string, { key: string; secret: string; hint: string }> 
   bingx: {
     key: "API key",
     secret: "Secret",
-    hint: "Права ключа BingX: чтение и торговля бессрочными фьючерсами. Вывод и переводы не включайте.",
+    url: "https://bingx.com/en/accounts/api",
+    hint:
+      "BingX: новый ключ по умолчанию только на чтение — торговлю бессрочными фьючерсами включите отдельно. Вывод и переводы не включайте. " +
+      "Ключ с правом торговли без привязки к IP удаляется после 14 дней без запросов.",
   },
   hyperliquid: {
     key: "Кошелёк",
     secret: "Ключ API-кошелька",
+    url: "https://app.hyperliquid.xyz/API",
     hint:
       "Hyperliquid подписывает ордера кошельком. «Кошелёк» — адрес основного кошелька (0x…). «Ключ API-кошелька» — " +
       "приватный ключ API-кошелька, созданного на app.hyperliquid.xyz/API. API-кошелёк не может выводить средства. " +
@@ -49,17 +78,26 @@ const KEY_FIELDS: Record<string, { key: string; secret: string; hint: string }> 
   bitget: {
     key: "API key",
     secret: "Secret",
-    hint: "Bitget: права чтения и торговли фьючерсами, без вывода; passphrase — та, что задана при создании ключа.",
+    url: "https://www.bitget.com/account/newapi",
+    hint:
+      "Bitget: в едином аккаунте — Unified account trade, read and write (плюс management, если менять плечо); в классическом — Trade. " +
+      "Withdraw и Transfer не включать. Passphrase — та, что задана при создании ключа.",
   },
   kucoin: {
     key: "API key",
     secret: "Secret",
-    hint: "KuCoin: права General и Futures, без Withdrawal; passphrase — та, что задана при создании ключа.",
+    url: "https://www.kucoin.com/account/api",
+    hint:
+      "KuCoin: права General и Futures (плюс Unified, если счёт в едином режиме), без Withdrawal и FlexTransfers. " +
+      "Passphrase — та, что задана при создании. Привяжите IP: без привязки торговые права отключаются после 30 дней простоя.",
   },
   bybit: {
     key: "API key",
     secret: "Secret",
-    hint: "Bybit: единый торговый аккаунт, права Contract / Derivatives Trade, без Withdraw. Режим маржи терминал не меняет — это настройка аккаунта.",
+    url: "https://www.bybit.com/app/user/api-management",
+    hint:
+      "Bybit: назначение ключа API Transaction, режим Read-Write, в группе Unified Trading тип Contract — Orders и Positions. " +
+      "Withdrawal и переводы не включать. Ключ без привязки к IP действует 90 дней. Режим маржи терминал не меняет — это настройка аккаунта.",
   },
 };
 
@@ -104,7 +142,7 @@ export function ExchangesSettings({ token, live }: { token: string; live: Exchan
         />
       ))}
       <p className="muted">
-        Ключи хранятся в Диспетчере учётных данных Windows и в интерфейс не возвращаются. Выпускайте ключи только с правами на
+        Ключи хранятся в хранилище ключей системы (Диспетчер учётных данных на Windows, связка ключей на macOS) и в интерфейс не возвращаются. Выпускайте ключи только с правами на
         чтение и фьючерсы, без вывода.
       </p>
     </>
@@ -166,7 +204,7 @@ function ExchangeCard({
   };
 
   const remove = async () => {
-    if (!window.confirm(`Удалить ключи ${exchangeTitle(exchange)} из Диспетчера учётных данных?`)) return;
+    if (!window.confirm(`Удалить ключи ${exchangeTitle(exchange)} из хранилища ключей системы?`)) return;
     await run("удаление", () => apiSend<ExchangeDetails>("DELETE", `/api/exchanges/${exchange.name}/keys`, token));
   };
 
@@ -220,6 +258,14 @@ function ExchangeCard({
           }}
         >
           {fields.hint && <p className="muted">{fields.hint}</p>}
+          {fields.url && (
+            <p className="muted">
+              <a href={fields.url} target="_blank" rel="noreferrer noopener">
+                создать ключ на бирже →
+              </a>{" "}
+              · пошагово: docs/KEYS.md
+            </p>
+          )}
           <label>
             <span>{fields.key}</span>
             <input type="password" value={apiKey} onChange={(event) => setApiKey(event.target.value)} spellCheck={false} />

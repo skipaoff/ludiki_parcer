@@ -13,6 +13,7 @@ import asyncio
 import logging
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 from typing import Any, Callable
 
@@ -22,6 +23,7 @@ import orjson
 from app.config.settings import LOOPBACK_HOSTS, DatabaseSettings
 from app.storage.bulk import bulk_insert, identifier
 from app.storage.migrations import migrate
+from app.storage.pg_binaries import find_pg_ctl
 
 log = logging.getLogger(__name__)
 
@@ -167,16 +169,17 @@ class Database:
     async def _ensure_cluster(self) -> None:
         if not self._settings.autostart or self._settings.host not in LOOPBACK_HOSTS:
             return
-        pg_ctl = self._settings.pg_bin_dir / ("pg_ctl.exe" if (self._settings.pg_bin_dir / "pg_ctl.exe").exists() else "pg_ctl")
-        if not pg_ctl.exists():
-            # The configured directory is the Windows one by default; elsewhere the binaries are wherever the
-            # package manager put them, and PATH is the one place worth looking before giving up.
-            found = shutil.which("pg_ctl")
-            if found is None:
-                log.warning("pg_ctl not found in %s or on PATH, not starting the cluster", self._settings.pg_bin_dir)
-                return
-            log.info("pg_ctl taken from PATH: %s", found)
-            pg_ctl = Path(found)
+        pg_ctl = find_pg_ctl(
+            self._settings.pg_bin_dir,
+            platform=sys.platform,
+            exists=lambda path: path.exists(),
+            which=shutil.which,
+        )
+        if pg_ctl is None:
+            log.warning("pg_ctl not found in %s, on PATH or in the usual places, not starting the cluster", self._settings.pg_bin_dir)
+            return
+        if pg_ctl.parent != self._settings.pg_bin_dir:
+            log.info("pg_ctl found at %s", pg_ctl)
         data_dir = str(self._settings.pg_data_dir)
         status = await asyncio.to_thread(_run, [str(pg_ctl), "status", "-D", data_dir])
         if status == 0:

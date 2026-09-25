@@ -8,7 +8,7 @@ import { useEffect, useState } from "react";
 import { price, rateText, signClass, signedPct, signedUsd, until } from "./money";
 import { compact } from "./Pairs";
 import { apiSend } from "./session";
-import { explainFailure, tradingAction } from "./trading";
+import { confirmed, explainFailure, fastTrading, tradingAction } from "./trading";
 import type { PortfolioView, PositionView, Snapshot, TradeCard } from "./types";
 
 const ISSUE_TEXT: Record<string, string> = {
@@ -36,6 +36,7 @@ export function PortfolioColumn({ token, snapshot }: { token: string; snapshot: 
   const now = Date.now();
   const keyed = (snapshot?.exchanges ?? []).filter((exchange) => exchange.keys !== "none");
   const trading = snapshot?.trading?.enabled ?? false;
+  const fast = fastTrading(snapshot?.trading);
   const openPairs = snapshot?.pairs.open ?? 0;
 
   useEffect(() => {
@@ -69,7 +70,7 @@ export function PortfolioColumn({ token, snapshot }: { token: string; snapshot: 
             {" "}
             · лимит {snapshot?.pairs.limit ?? 0}
           </span>
-          {snapshot?.pairs.sleep_blocked ? <span className="muted"> · сон Windows запрещён</span> : null}
+          {snapshot?.pairs.sleep_blocked ? <span className="muted"> · сон компьютера запрещён</span> : null}
         </span>
         <button
           className="action"
@@ -101,7 +102,11 @@ export function PortfolioColumn({ token, snapshot }: { token: string; snapshot: 
           now={now}
           busy={busy}
           trading={trading}
-          onClose={() => act(() => tradingAction("/api/trading/close", token, { trade_id: trade.id }))}
+          onClose={() => {
+            const question = `Закрыть пару ${trade.token}: ${trade.qty_tokens} ${trade.token}, лонг ${trade.long.exchange.toUpperCase()}, шорт ${trade.short.exchange.toUpperCase()}.\nОбе ноги закроются по рынку.`;
+            if (!confirmed(fast, question)) return;
+            act(() => tradingAction("/api/trading/close", token, { trade_id: trade.id }));
+          }}
           onCloseLeg={(side) => act(() => tradingAction("/api/trading/close-leg", token, { trade_id: trade.id, side }))}
           onCloseRecord={() => act(() => apiSend("POST", `/api/portfolio/trades/${trade.id}/close-record`, token))}
         />

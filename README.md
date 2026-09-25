@@ -17,8 +17,9 @@
 ## С чего читать
 
 1. [`docs/PLAN.md`](docs/PLAN.md) — полный план: решения, экраны, архитектура, формулы, база, дорожная карта до MVP и дальше. Отличия Windows — раздел 4.6.
-2. [`docs/EXCHANGES.md`](docs/EXCHANGES.md) — эндпоинты и особенности Binance, MEXC и следующих бирж, с пометками «проверено» или «проверить».
-3. [`reference/crypto_pars/README.md`](reference/crypto_pars/README.md) — наработки из парсера: что перенесено, что исправлено, почему старую логику нельзя торговать как есть.
+2. [`docs/KEYS.md`](docs/KEYS.md) — как получить ключ с правом торговли на каждой из девяти бирж и что нельзя включать.
+3. [`docs/EXCHANGES.md`](docs/EXCHANGES.md) — эндпоинты и особенности Binance, MEXC и следующих бирж, с пометками «проверено» или «проверить».
+4. [`reference/crypto_pars/README.md`](reference/crypto_pars/README.md) — наработки из парсера: что перенесено, что исправлено, почему старую логику нельзя торговать как есть.
 
 ## Установка на новую машину
 
@@ -57,7 +58,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts\windows\create_deskt
 
 Торговля выключена, пока в `config.toml` не стоит `[trading] enabled = true`. Порядок включения:
 
-1. Ключи в «Настройки → Биржи», обе проверки приняты (без права вывода, режим позиций one-way).
+1. Ключи в «Настройки → Биржи», проверка принята (без права вывода, режим позиций one-way). Как их получить — `docs/KEYS.md`.
 2. Исключения HTTPS-сканирования антивируса для `*.binance.com` и `*.mexc.com`.
 3. Пробная сделка на каждой бирже: открывает и сразу закрывает минимальную позицию, ответы сохраняет в `ludik-data/trials`.
 
@@ -65,11 +66,13 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts\windows\create_deskt
 .venv\Scripts\python.exe scripts\trial_trade.py binance --demo --i-understand
 ```
 
-```bat
-.venv\Scripts\python.exe scripts\trial_trade.py mexc --i-understand
+```bash
+.venv/bin/python scripts/trial_trade.py binance --demo --i-understand
 ```
 
-4. `enabled = true`, плечо и лимиты в разделе `[trading]`, перезапуск `ludik.cmd`.
+Дальше так же для каждой биржи, где есть ключи: `mexc`, `gate`, `aster`, `bingx`, `bybit`, `bitget`, `kucoin`, `hyperliquid`.
+
+4. `enabled = true`, плечо и лимиты в разделе `[trading]`, перезапуск терминала.
 5. Первая пара — на минимальном размере над лентой; сверка цен, комиссий и PnL с биржами.
 
 ## Окружение (Windows 11)
@@ -84,7 +87,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts\windows\create_deskt
 
 Данные терминала лежат рядом с репозиторием, в `C:\projects\ludik-data`: бинарники и кластер PostgreSQL, буфер записи `spool`, логи `logs`.
 
-Если антивирус перехватывает HTTPS (на машине разработки это Avast), uv настроен на системные сертификаты в `pyproject.toml`, а для npm нужен `NODE_OPTIONS=--use-system-ca` — `ludik.cmd` выставляет его сам. Для доменов бирж перехват нужно выключить в антивирусе до этапа 1.
+Если антивирус перехватывает HTTPS (на машине разработки это Avast), uv настроен на системные сертификаты в `pyproject.toml`, а для npm нужен `NODE_OPTIONS=--use-system-ca` — `ludik.cmd` выставляет его сам. Для доменов бирж перехват нужно выключить в антивирусе до этапа 1. Сам терминал в обеих системах проверяет сертификаты по хранилищу системы: свой общий TLS-контекст выдаётся каждому соединению.
 
 ## Окружение (macOS)
 
@@ -106,15 +109,21 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts\windows\create_deskt
 
 При первом чтении пароля macOS спросит, можно ли Python обратиться к связке ключей: **Always Allow**.
 
-Последний шаг — свой `config.toml` с путём к бинарникам PostgreSQL (у Homebrew они не в `PATH`):
+Дальше можно запускать: `config.toml` для этого не нужен. Терминал ищет бинарники PostgreSQL по очереди — в папке из настроек, в `PATH`, затем в префиксах Homebrew. Свой `config.toml` нужен, только если ты хочешь поменять настройки:
 
 ```bash
 cp config.example.toml config.toml
-# в нём: pg_bin_dir = "/opt/homebrew/opt/postgresql@18/bin"   (путь печатает setup.sh)
-./ludik.sh
 ```
 
-Данные терминала лежат рядом с репозиторием, в `../ludik-data`: кластер PostgreSQL, буфер записи `spool`, логи `logs`. Ярлыка на рабочем столе на macOS нет — терминал запускается из `./ludik.sh`.
+Данные терминала лежат рядом с репозиторием, в `../ludik-data`: кластер PostgreSQL, буфер записи `spool`, логи `logs`.
+
+**Ярлык на рабочем столе:**
+
+```bash
+./scripts/macos/create_desktop_shortcut.sh
+```
+
+Создаёт «Terminal Ludik.command»: он открывает Терминал, запускает терминал и оставляет окно, если запуск не удался. Повторно — с `--force`.
 
 ## Структура
 
@@ -149,6 +158,7 @@ tests/                  тесты: ядро, конфиг, ключи, журн
 scripts/
   windows/              ярлык на рабочем столе и иконка
   macos/setup.sh        разовая установка на Mac: кластер, база, пароль в связке ключей
+  macos/create_desktop_shortcut.sh   ярлык на рабочем столе для Mac
 .github/workflows/      CI: тесты на Ubuntu и Windows, сборка интерфейса, схема на PostgreSQL 18 + TimescaleDB
 ludik.cmd               запуск одной командой на Windows
 ludik.sh                то же на macOS и Linux
@@ -185,6 +195,7 @@ CI повторяет все проверки при каждом пуше в `m
 
 - **Где что решено.** Все решения и дорожная карта — в `docs/PLAN.md`. Если решение меняется, план правится в том же PR, что и код.
 - **Ветки.** Одна ветка на этап или задачу (`stage-1-exchanges`), в `main` через pull request с зелёным CI.
+- **Обе системы равны.** Терминал работает на Windows 11 и на macOS; тесты в CI идут на обеих плюс Ubuntu. Платформенное поведение (сон, поиск PostgreSQL, ярлык) живёт в отдельных файлах и покрыто тестами, а не разбросано по коду.
 - **Паспорт файла.** Новый файл начинается с паспорта: VFP / Changes when / Anti-goal.
 - **Где живут решения.** Решения — чистые функции в `app/core/` с тестами. Сеть, база и время — только в оболочке.
 - **Миграции.** Применённый файл `db/NNN_*.sql` не редактируется: изменение — новый файл со следующим номером. Терминал сверяет контрольные суммы и не стартует запись при расхождении.

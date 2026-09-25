@@ -7,6 +7,9 @@ from types import SimpleNamespace
 import pytest
 
 from app.config.settings import PortfolioSettings, TradingSettings
+from app.core.funding import PairFunding
+from app.core.interest import Interest
+from app.core.measure import Measurement
 from app.core.schemas import LegSide
 from app.execution.service import ExecutionService, TradingError
 from app.journal.journal import Journal
@@ -69,6 +72,22 @@ class FakeEngine:
 
     def current_quote(self, key):
         return None if self.quote is None or key != PAIR_KEY else (self.record, self.quote, None)
+
+    def measurement_for(self, key, episode_key=None):
+        """The numbers the clicked row showed: profit plus funding over the horizon, and its interest score."""
+        if self.quote is None or key != PAIR_KEY:
+            return None
+        return Measurement(
+            funding=PairFunding(
+                hourly_pct=Decimal("0.01"),
+                horizon_pct=Decimal("0.08"),
+                next_ms=None,
+                next_pct=None,
+                changes_ms=None,
+            ),
+            total_pct=Decimal("1.08"),
+            score=Interest(score=61, result=27, depth=20, stability=5, liquidity=9),
+        )
 
     def view(self):
         return {"rows": [{"key": PAIR_KEY}]}
@@ -151,6 +170,14 @@ async def test_both_legs_fill_and_the_pair_opens():
     assert [sent["units"] for sent in h.mexc.sent] == [Decimal("100")]  # 10 SOL in 0.1 SOL contracts
     assert len(table(h, "fills")) == 2
     assert critical(h) == []
+    # The trade keeps what its row promised, so history can compare what was opened against what was shown.
+    assert (trade.total_pct_at_open, trade.funding_horizon_pct_at_open, trade.interest_at_open) == (
+        Decimal("1.08"),
+        Decimal("0.08"),
+        61,
+    )
+    stored = table(h, "trades")[-1]
+    assert stored["total_pct_at_open"] == Decimal("1.08") and stored["interest_at_open"] == 61
 
 
 async def test_rejected_leg_is_hedged_by_closing_the_filled_one():

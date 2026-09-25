@@ -169,7 +169,7 @@ class FeedSettings(_Section):
     exit_hysteresis_pct: Decimal = Field(default=Decimal("0.10"), ge=0)
     exit_after_ms: int = Field(default=2000, ge=0)
     default_taker_fee_binance_pct: Decimal = Field(default=Decimal("0.05"), ge=0)
-    default_taker_fee_mexc_pct: Decimal = Field(default=Decimal("0.05"), ge=0)
+    default_taker_fee_mexc_pct: Decimal = Field(default=Decimal("0.08"), ge=0)
     default_taker_fee_gate_pct: Decimal = Field(default=Decimal("0.075"), ge=0)
     default_taker_fee_aster_pct: Decimal = Field(default=Decimal("0.035"), ge=0)
     default_taker_fee_bingx_pct: Decimal = Field(default=Decimal("0.05"), ge=0)
@@ -209,9 +209,6 @@ class TradingSettings(_Section):
     leverage_bitget: int = Field(default=3, ge=1, le=50)
     leverage_kucoin: int = Field(default=3, ge=1, le=50)
     leverage_hyperliquid: int = Field(default=3, ge=1, le=50)
-
-    def leverage(self, exchange: str) -> int:
-        return getattr(self, f"leverage_{exchange}", 1)
     isolated: bool = True
     entry_min_roi_pct: Decimal = Decimal("1.00")
     max_open_pairs: int = Field(default=3, ge=1, le=50)
@@ -224,6 +221,11 @@ class TradingSettings(_Section):
     close_retry_pause_ms: int = Field(default=300, ge=0)
     maintenance_block_s: int = Field(default=60, ge=1)
     warmup_retry_s: int = Field(default=60, ge=5)
+    fast_trading: bool = True
+    """One click opens or closes a pair. False asks for confirmation first; changeable from the interface."""
+
+    def leverage(self, exchange: str) -> int:
+        return getattr(self, f"leverage_{exchange}", 1)
 
 
 class LoggingSettings(_Section):

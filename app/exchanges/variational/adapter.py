@@ -22,6 +22,7 @@ from typing import Any, Mapping
 import aiohttp
 import orjson
 
+from app.system.tls import client_session
 from app.core.account import AccountFacts
 from app.core.pairs import Quote
 from app.core.schemas import Instrument
@@ -188,7 +189,7 @@ class VariationalAdapter:
                 return self._stats
             if self._session is None or self._session.closed:
                 # Cloudflare in front of the API answers 403 to some default client names (Python-urllib); name ours.
-                self._session = aiohttp.ClientSession(timeout=self._timeout, headers=HEADERS)
+                self._session = client_session(timeout=self._timeout, headers=HEADERS)
             started = time.monotonic()
             async with self._session.get(STATS_URL) as response:
                 response.raise_for_status()

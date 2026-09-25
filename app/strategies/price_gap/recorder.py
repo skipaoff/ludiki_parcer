@@ -16,8 +16,11 @@ from decimal import Decimal
 from typing import Any, Callable, Protocol
 
 from app.core.episodes import EpisodeState
+from app.core.measure import Measurement
 from app.instruments.service import PairRecord
 from app.storage.ids import LocalIds
+
+Measured = Callable[[], Measurement | None]
 
 SAMPLE_EVERY_MS = 1_000
 REFRESH_EVERY_MS = 60_000
@@ -39,7 +42,15 @@ class QuoteLike(Protocol):
 class EpisodeSink(Protocol):
     def entered(self, episode_key: str, record: PairRecord, state: EpisodeState, now_ms: int) -> None: ...
 
-    def sampled(self, episode_key: str, record: PairRecord, state: EpisodeState, quote: QuoteLike | None, now_ms: int) -> None: ...
+    def sampled(
+        self,
+        episode_key: str,
+        record: PairRecord,
+        state: EpisodeState,
+        quote: QuoteLike | None,
+        now_ms: int,
+        measured: Measured | None = None,
+    ) -> None: ...
 
     def left_feed(self, episode_key: str, now_ms: int) -> None: ...
 
@@ -75,6 +86,10 @@ class _Open:
     last_sample_ms: int = 0
     last_refresh_ms: int = 0
     capacity_peak: Decimal | None = None
+    funding_horizon_first: Decimal | None = None
+    total_peak: Decimal | None = None
+    total_peak_ms: int | None = None
+    interest_peak: int | None = None
     extra: dict[str, Any] = field(default_factory=dict)
 
 
@@ -114,7 +129,15 @@ class EpisodeRecorder:
         self.recorded += 1
         self._write(opened, record, state, now_ms, ended_ms=None, reason=None)
 
-    def sampled(self, episode_key: str, record: PairRecord, state: EpisodeState, quote: QuoteLike | None, now_ms: int) -> None:
+    def sampled(
+        self,
+        episode_key: str,
+        record: PairRecord,
+        state: EpisodeState,
+        quote: QuoteLike | None,
+        now_ms: int,
+        measured: Measured | None = None,
+    ) -> None:
         opened = self._open.get(episode_key)
         if opened is None or quote is None or now_ms - opened.last_sample_ms < SAMPLE_EVERY_MS:
             return
@@ -122,6 +145,16 @@ class EpisodeRecorder:
         opened.samples += 1
         if quote.capacity_usd is not None and (opened.capacity_peak is None or quote.capacity_usd > opened.capacity_peak):
             opened.capacity_peak = quote.capacity_usd
+        measurement = measured() if measured is not None else None
+        funding = measurement.funding if measurement else None
+        if funding is not None and opened.funding_horizon_first is None:
+            opened.funding_horizon_first = funding.horizon_pct
+        if measurement is not None and measurement.total_pct is not None:
+            if opened.total_peak is None or measurement.total_pct > opened.total_peak:
+                opened.total_peak, opened.total_peak_ms = measurement.total_pct, now_ms
+        if measurement is not None and measurement.interest is not None:
+            if opened.interest_peak is None or measurement.interest > opened.interest_peak:
+                opened.interest_peak = measurement.interest
         self._submit(
             "episode_samples",
             {
@@ -137,6 +170,14 @@ class EpisodeRecorder:
                 "exit_spread_pct": quote.exit_spread_pct,
                 "age_long_ms": None if quote.age_long_ms is None else int(quote.age_long_ms),
                 "age_short_ms": None if quote.age_short_ms is None else int(quote.age_short_ms),
+                # Funding and interest: what the trader saw next to the spread, so thresholds can be
+                # calibrated on the same numbers the screen showed.
+                "funding_hourly_pct": None if funding is None else funding.hourly_pct,
+                "funding_horizon_pct": None if funding is None else funding.horizon_pct,
+                "funding_next_pct": None if funding is None else funding.next_pct,
+                "funding_next_at": None if funding is None else _ts(funding.next_ms),
+                "total_pct": None if measurement is None else measurement.total_pct,
+                "interest": None if measurement is None else measurement.interest,
             },
         )
         if now_ms - opened.last_refresh_ms >= REFRESH_EVERY_MS:
@@ -202,5 +243,9 @@ class EpisodeRecorder:
                 "missed_best_exit_at": _ts(state.missed_best_exit_ms),
                 "samples_count": opened.samples,
                 "settings_snapshot": opened.settings,
+                "funding_horizon_pct_first": opened.funding_horizon_first,
+                "total_peak_pct": opened.total_peak,
+                "total_peak_at": _ts(opened.total_peak_ms),
+                "interest_peak": opened.interest_peak,
             },
         )

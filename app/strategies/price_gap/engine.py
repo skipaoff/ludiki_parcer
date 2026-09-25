@@ -22,7 +22,7 @@ from typing import Any, Callable, Mapping, Protocol
 from app.config.settings import FeedSettings
 from app.core.episodes import EpisodeRules, EpisodeState, EventKind, Phase, Sample, end, step
 from app.core.funding import FundingRate, PairFunding, pair_funding
-from app.core.interest import interest
+from app.core.measure import Measurement, measure
 from app.core.links import trade_url
 from app.core.qty import QtyRejected, plan_quantity
 from app.core.radar import TopCheck, TopRoi, best_price_roi, choose_books, leg_fresh
@@ -526,7 +526,40 @@ class PriceGapEngine:
         self._episodes[episode_key] = state
         self._episode_pair[episode_key] = record.key
         if state.phase in (Phase.IN_FEED, Phase.TRACKING):
-            self._sink.sampled(episode_key, record, state, quote, sample.ts_ms)
+            # The measurement is a callable: the recorder samples once a second, and funding and interest are
+            # only worth computing for the ticks it actually keeps.
+            self._sink.sampled(
+                episode_key,
+                record,
+                state,
+                quote,
+                sample.ts_ms,
+                lambda: self._measure_pair(record, quote, state.detected_ms, sample.ts_ms),
+            )
+
+    def _measure_pair(self, record: PairRecord, quote: _Quote | None, detected_ms: int | None, now_ms: int) -> Measurement | None:
+        """Funding, expected result and interest of a gap — the same numbers the feed row shows."""
+        if quote is None or quote.long is None or quote.short is None:
+            return None
+        funding, _ = self._pair_funding(quote.long, quote.short, now_ms)
+        return measure(
+            quote.roi_net_pct,
+            funding,
+            quote.capacity_usd,
+            quote.size_usd or self._settings.size_usd,
+            None if detected_ms is None else now_ms - detected_ms,
+            record.assessment.volume24h_weak_usd,
+            record.suspicious or record.blacklisted,
+            scored=quote.problem != "stale",
+        )
+
+    def measurement_for(self, pair_key: str, episode_key: str | None = None) -> Measurement | None:
+        """What a pair promises right now — used when a trade is opened, so the trade keeps the numbers of its row."""
+        record, quote = self._records.get(pair_key), self._quotes.get(pair_key)
+        if record is None or quote is None:
+            return None
+        state = self._episodes.get(episode_key) if episode_key else None
+        return self._measure_pair(record, quote, state.detected_ms if state else None, int(self._clock_ms()))
 
     def _end_unwatched(self, now: float) -> None:
         for episode_key, pair_key in list(self._episode_pair.items()):
@@ -589,18 +622,18 @@ class PriceGapEngine:
         # for hours is not news, and the screen sorts those out by this number.
         in_feed_ms = int(now - episode.first_entered_feed_ms) if episode and episode.first_entered_feed_ms is not None else None
         profit_pct = quote.roi_net_pct if quote else None
-        # Expected result: the spread after book and fees if prices converge, plus funding over the horizon.
-        total_pct = None if profit_pct is None else profit_pct + (funding.horizon_pct if funding else Decimal(0))
-        score = None
-        if block != "stale":
-            score = interest(
-                total_pct,
-                quote.capacity_usd if quote else None,
-                size,
-                lifetime_ms,
-                assessment.volume24h_weak_usd,
-                record.suspicious or record.blacklisted,
-            )
+        # Expected result and interest: the same arithmetic the history rows record (core/measure.py).
+        measured = measure(
+            profit_pct,
+            funding,
+            quote.capacity_usd if quote else None,
+            size,
+            lifetime_ms,
+            assessment.volume24h_weak_usd,
+            record.suspicious or record.blacklisted,
+            scored=block != "stale",
+        )
+        total_pct, score = measured.total_pct, measured.score
         row = {
             "key": record.key,
             "token": assessment.token,

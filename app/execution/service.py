@@ -132,7 +132,9 @@ class ExecutionService:
         ids: LocalIds | None = None,
         sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
         order_events: Any = None,
+        funding: Callable[[str, str], Any] = lambda exchange, symbol: None,
     ) -> None:
+        self._funding = funding
         self._order_events = order_events
         """exchanges: ExchangeService; engine: PriceGapEngine; portfolio: PortfolioService; recorder: EpisodeRecorder."""
         self._settings = settings
@@ -382,6 +384,9 @@ class ExecutionService:
         clicked = self._clock_ms()
         long, short = quote.long, quote.short
         qty = quote.qty_tokens
+        # The decision numbers of the row being clicked, kept with the trade: funding and interest live in memory,
+        # and without this the history could never compare what was opened against what was shown.
+        measurement = self._engine.measurement_for(record.key, episode_key)
         trade = Trade(
             id=self._ids.next(),
             token=record.assessment.token,
@@ -404,6 +409,9 @@ class ExecutionService:
             episode_id=self._recorder.episode_id(episode_key) if episode_key else None,
             roi_expected_entry=quote.roi_net_pct,
             exit_spread_expected=quote.exit_spread_pct,
+            total_pct_at_open=measurement.total_pct if measurement else None,
+            funding_horizon_pct_at_open=measurement.funding.horizon_pct if measurement and measurement.funding else None,
+            interest_at_open=measurement.interest if measurement else None,
         )
         self._portfolio.add_trade(trade)
         if episode_key:
@@ -591,8 +599,22 @@ class ExecutionService:
             long_funding = await self._exchanges.adapter(trade.long_exchange).fetch_funding_usd(trade.long_symbol, trade.opened_at_ms)
             short_funding = await self._exchanges.adapter(trade.short_exchange).fetch_funding_usd(trade.short_symbol, trade.opened_at_ms)
             trade.funding_usd = long_funding + short_funding
-            for exchange, amount in ((trade.long_exchange, long_funding), (trade.short_exchange, short_funding)):
-                self._submit("funding_payments", {"trade_id": trade.id, "exchange": exchange, "ts": _ts(self._clock_ms()), "rate": None, "amount_usd": amount})
+            for exchange, symbol, amount in (
+                (trade.long_exchange, trade.long_symbol, long_funding),
+                (trade.short_exchange, trade.short_symbol, short_funding),
+            ):
+                # The rate is the one in force at the close: the exchange reports what was paid, not at which rate.
+                rate = self._funding(exchange, symbol)
+                self._submit(
+                    "funding_payments",
+                    {
+                        "trade_id": trade.id,
+                        "exchange": exchange,
+                        "ts": _ts(self._clock_ms()),
+                        "rate": None if rate is None else rate.rate_pct,
+                        "amount_usd": amount,
+                    },
+                )
         except Exception as exc:
             log.warning("funding at close of trade %s failed: %s", trade.id, exc)
         trade.fees_usd = trade.fees_usd + self._fees_of(closes)
@@ -668,6 +690,13 @@ class ExecutionService:
     def annotate(self, rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
         return [{**row, "open_blocks": self.open_blocks_for(row["key"])} for row in rows]
 
+    def settings(self) -> TradingSettings:
+        return self._settings
+
+    def apply_settings(self, settings: TradingSettings) -> None:
+        """Takes effect on the next click; nothing in flight changes its mind halfway."""
+        self._settings = settings
+
     def status(self) -> dict[str, Any]:
         now = self._clock_ms()
         return {
@@ -683,5 +712,6 @@ class ExecutionService:
                 "max_open_pairs": self._settings.max_open_pairs,
                 "max_total_usd": str(self._settings.max_total_usd),
                 "margin_buffer_pct": str(self._settings.margin_buffer_pct),
+                "fast_trading": self._settings.fast_trading,
             },
         }

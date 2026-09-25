@@ -20,6 +20,7 @@ from typing import Any, Awaitable, Callable, Iterable
 import aiohttp
 import orjson
 
+from app.system.tls import client_session
 from app.core.funding import FundingRate
 
 log = logging.getLogger(__name__)
@@ -224,7 +225,7 @@ class FundingService:
         }
 
     async def run(self) -> None:
-        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=30), headers=HEADERS) as session:
+        async with client_session(timeout=aiohttp.ClientTimeout(total=30), headers=HEADERS) as session:
             loops = [self._loop(name, session) for name in self._exchanges if name in FETCHERS or name == "variational"]
             await asyncio.gather(*loops)
 

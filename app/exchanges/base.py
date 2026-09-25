@@ -6,20 +6,21 @@ Anti-goal:
 2. Exchange-native units leaking out — books, positions and fills leave the adapter per token.
 3. Retry or circuit-breaker logic mixed into adapter methods — resilience wraps the adapter as a separate layer.
 
-Stage 1 implements close, probe_clock and check_account; the rest is the draft for stages 2–6
-(docs/PLAN.md, section 14). Trading and private data sit on ccxt, public market streams on our own websocket clients.
+Trading, positions, balances and funding sit on ccxt behind this contract; public market data does not —
+best prices and books come from our own websocket and REST clients in app/market, which is why no streaming
+method appears here.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 from decimal import Decimal
-from typing import Any, AsyncIterator, Mapping, Protocol
+from typing import Any, Mapping, Protocol
 
 from app.core.account import AccountFacts
 from app.core.legs import OrderOutcome
 from app.core.pairs import Quote
-from app.core.schemas import Book, Instrument, LegSide
+from app.core.schemas import Instrument, LegSide
 
 
 @dataclass(frozen=True, slots=True)
@@ -29,23 +30,6 @@ class ClockProbe:
     ping_ms: int
     clock_offset_ms: int | None
     server_ts_ms: int | None
-
-
-@dataclass(frozen=True, slots=True)
-class TopOfBook:
-    symbol_raw: str
-    bid: Decimal
-    ask: Decimal
-    exchange_ts_ms: int
-    received_ts_ms: int
-
-
-@dataclass(frozen=True, slots=True)
-class MarkIndex:
-    symbol_raw: str
-    mark_price: Decimal
-    index_price: Decimal | None
-    ts_ms: int
 
 
 @dataclass(frozen=True, slots=True)
@@ -127,14 +111,6 @@ class ExchangeAdapter(Protocol):
         """Public. Best prices, mark, index and 24h turnover of every contract, keyed by raw symbol."""
         ...
 
-    def watch_top_of_book(self, symbols_raw: list[str]) -> AsyncIterator[TopOfBook]: ...
-
-    def watch_book(self, symbol_raw: str) -> AsyncIterator[Book]: ...
-
-    def watch_mark_index(self) -> AsyncIterator[MarkIndex]: ...
-
-    async def fetch_volume_24h_usd(self) -> dict[str, Decimal]: ...
-
     async def prepare_symbol(self, instrument: Instrument, leverage: int, isolated: bool) -> None:
         """Needs keys. Set leverage and margin mode for a contract; already-set values are not an error."""
         ...
@@ -175,6 +151,3 @@ class ExchangeAdapter(Protocol):
         """Needs keys. Net funding received (positive) or paid (negative) on a contract since a moment."""
         ...
 
-    def watch_positions(self) -> AsyncIterator[Position]: ...
-
-    def watch_orders(self) -> AsyncIterator[OrderReport]: ...

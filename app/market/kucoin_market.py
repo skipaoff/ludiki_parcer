@@ -18,6 +18,7 @@ from typing import Any, Iterable
 import aiohttp
 import orjson
 
+from app.system.tls import client_session
 from app.market.depth_pool import BookBuffer, DepthPool, Poller
 from app.market.state import MarketState
 
@@ -42,7 +43,6 @@ def handle_frame(buffer: BookBuffer, state: MarketState, raw: str | bytes) -> No
     topic = message.get("topic") or ""
     if message.get("subject") == "level2" and topic.startswith(TOPIC):
         data = message.get("data") or {}
-        state.count(EXCHANGE)
         buffer.put(topic.split(":", 1)[1], data.get("bids") or [], data.get("asks") or [], int(data.get("ts") or data.get("timestamp") or 0))
 
 
@@ -83,7 +83,7 @@ class KucoinMarket:
         self._contracts = Poller("kucoin contracts", CONTRACTS_POLL_S, self._poll_contracts)
 
     async def _socket_url(self) -> str:
-        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10)) as session:
+        async with client_session(timeout=aiohttp.ClientTimeout(total=10)) as session:
             async with session.post(BULLET_URL) as response:
                 response.raise_for_status()
                 bullet = (orjson.loads(await response.read()))["data"]
@@ -107,7 +107,6 @@ class KucoinMarket:
         for symbol, bid, ask in ticker_rows(await self._get(TICKERS_URL)):
             if bid > 0 and ask > 0:
                 self._state.set_top(EXCHANGE, symbol, bid, ask, now)
-        self._state.count(EXCHANGE)
 
     async def _poll_contracts(self) -> None:
         for symbol, mark, index, volume in contract_rows(await self._get(CONTRACTS_URL)):
@@ -116,7 +115,7 @@ class KucoinMarket:
     async def run(self) -> None:
         self._pool.start()
         try:
-            async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=15)) as session:
+            async with client_session(timeout=aiohttp.ClientTimeout(total=15)) as session:
                 self._session = session
                 await asyncio.gather(self._tickers.run(), self._contracts.run(), self._buffer.run())
         finally:
