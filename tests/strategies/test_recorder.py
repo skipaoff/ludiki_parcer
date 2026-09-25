@@ -66,7 +66,7 @@ def test_gap_of_a_suspicious_pair_is_counted_but_not_recorded():
     engine, state, clock, binance, mexc, recorder, rows = record_engine()
     record = engine._catalog.records()[0]
     record.assessment = assess_pair(
-        record.assessment.a, record.assessment.b, Quote(mark=Decimal("100"), index=Decimal("100")), Quote(mark=Decimal("100"), index=Decimal("104"))
+        record.assessment.a, record.assessment.b, Quote(mark=Decimal("100"), index=Decimal("100")), Quote(mark=Decimal("104"), index=Decimal("104"))
     )
     engine.tick()
     push_market(state)

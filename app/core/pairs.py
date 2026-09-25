@@ -169,7 +169,7 @@ def assess_pair(
         # A wrong multiplier or a different token under the same ticker; no real gap is this wide.
         reason = "price_mismatch"
     else:
-        reason = same_asset_verdict(index_a, index_b, max_index_gap_pct)
+        reason = same_asset_verdict(index_a, index_b, max_index_gap_pct, price_a, price_b)
 
     volumes = [quote.volume24h_usd for quote in (quote_a, quote_b) if quote is not None]
     weak_volume = min(volumes) if len(volumes) == 2 and all(volume is not None for volume in volumes) else None

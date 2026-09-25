@@ -77,8 +77,11 @@ def test_recorded_pairs_match_and_multipliers_agree_per_token():
     assert assessed["PEPE"].price_gap_pct < 1
     assert assessed["MOG"].price_gap_pct < 1
     assert assessed["BTC"].suspicious_reason is None
-    # On the recording day ONE's index prices disagreed by about 4.7 %.
-    assert assessed["ONE"].suspicious_reason == "index_mismatch"
+    # On the recording day ONE's index prices disagreed by 4.7 % while both books stood at the same
+    # 0.00068065 — the same asset with one bad index feed, not two coins under one ticker.
+    assert assessed["ONE"].index_gap_pct > Decimal("4.7")
+    assert assessed["ONE"].price_gap_pct == 0
+    assert assessed["ONE"].suspicious_reason is None
 
 
 def test_trade_links_point_at_the_pages_the_exchanges_serve_today():

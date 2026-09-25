@@ -59,3 +59,23 @@ def test_same_asset_verdict_flags_index_mismatch_and_missing_index():
     assert same_asset_verdict(Decimal("1.000"), Decimal("1.005"), limit) is None
     assert same_asset_verdict(Decimal("1.00"), Decimal("1.40"), limit) == "index_mismatch"
     assert same_asset_verdict(None, Decimal("1.0"), limit) == "index_missing"
+
+
+def test_prices_on_top_of_each_other_overrule_a_broken_index():
+    # BingX published an index 31 % away from its own ONE price, which traded within 0.14 % of Binance's.
+    limit = Decimal("1")
+    verdict = same_asset_verdict(Decimal("0.0018"), Decimal("0.00236"), limit, Decimal("0.0022486"), Decimal("0.0022517"))
+
+    assert verdict is None
+
+
+def test_an_index_mismatch_stands_when_the_prices_disagree_too():
+    limit = Decimal("1")
+    verdict = same_asset_verdict(Decimal("0.001291"), Decimal("0.001244"), limit, Decimal("0.00124"), Decimal("0.001261"))
+
+    assert verdict == "index_mismatch"
+
+
+def test_missing_prices_leave_the_indices_to_decide():
+    limit = Decimal("1")
+    assert same_asset_verdict(Decimal("1.00"), Decimal("1.40"), limit, None, None) == "index_mismatch"

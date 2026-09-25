@@ -168,7 +168,7 @@ def test_quiet_book_is_trusted_only_up_to_its_limit():
 def test_suspicious_pair_is_shown_but_blocked():
     record = sol_record()
     record.assessment = assess_pair(
-        record.assessment.a, record.assessment.b, Quote(mark=Decimal("100"), index=Decimal("100")), Quote(mark=Decimal("100"), index=Decimal("104"))
+        record.assessment.a, record.assessment.b, Quote(mark=Decimal("100"), index=Decimal("100")), Quote(mark=Decimal("104"), index=Decimal("104"))
     )
     engine, state, clock, *_ = build(record)
     engine.tick()
@@ -350,9 +350,10 @@ def test_unchanged_books_are_not_walked_again(monkeypatch):
 def test_tradable_pairs_take_books_before_suspicious_ones():
     normal = Quote(mark=Decimal("100"), index=Decimal("100"))
     records = []
-    for coin, index_b in (("AAA", "104"), ("BBB", "100"), ("CCC", "100")):  # AAA has the widest gap but a suspicious index
+    for coin, other in (("AAA", "104"), ("BBB", "100"), ("CCC", "100")):  # AAA has the widest gap but a suspicious index
         a, b = instrument("binance", f"{coin}USDT", coin), instrument("mexc", f"{coin}_USDT", coin)
-        assessment = assess_pair(a, b, normal, Quote(mark=Decimal("100"), index=Decimal(index_b)))
+        # Index and price both away from the other leg: an index alone no longer makes a pair suspicious.
+        assessment = assess_pair(a, b, normal, Quote(mark=Decimal(other), index=Decimal(other)))
         records.append(PairRecord(key=f"binance:{coin}USDT|mexc:{coin}_USDT", assessment=assessment))
     clock = Clock()
     state = MarketState(clock)
@@ -373,9 +374,9 @@ def test_tradable_pairs_take_books_before_suspicious_ones():
 def test_radar_coins_from_tradable_pairs_come_before_suspicious_spreads():
     normal = Quote(mark=Decimal("100"), index=Decimal("100"))
     records = []
-    for coin, index_b in (("AAA", "104"), ("BBB", "100"), ("CCC", "100")):
+    for coin, other in (("AAA", "104"), ("BBB", "100"), ("CCC", "100")):
         a, b = instrument("binance", f"{coin}USDT", coin), instrument("mexc", f"{coin}_USDT", coin)
-        records.append(PairRecord(key=f"binance:{coin}USDT|mexc:{coin}_USDT", assessment=assess_pair(a, b, normal, Quote(mark=Decimal("100"), index=Decimal(index_b)))))
+        records.append(PairRecord(key=f"binance:{coin}USDT|mexc:{coin}_USDT", assessment=assess_pair(a, b, normal, Quote(mark=Decimal(other), index=Decimal(other)))))
     clock = Clock()
     state = MarketState(clock)
     engine = PriceGapEngine(Catalog(records), state, {"binance": FakeFeed(clock), "mexc": FakeFeed(clock)},

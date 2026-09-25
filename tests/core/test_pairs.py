@@ -43,12 +43,20 @@ def test_wrong_multiplier_shows_up_as_price_mismatch():
     assert assessment.suspicious_reason == "price_mismatch"
 
 
-def test_index_disagreement_flags_a_different_asset_even_when_prices_match():
+def test_index_disagreement_flags_a_different_asset_when_the_prices_disagree_too():
     a = instrument("binance", "ONEUSDT", "ONE")
     b = instrument("mexc", "ONE_USDT", "ONE", min_notional_usd="0")
-    assessment = assess_pair(a, b, Quote(mark=D("0.01"), index=D("0.0100")), Quote(mark=D("0.01"), index=D("0.0105")))
+    assessment = assess_pair(a, b, Quote(mark=D("0.0100"), index=D("0.0100")), Quote(mark=D("0.0104"), index=D("0.0105")))
     assert assessment.suspicious_reason == "index_mismatch"
     assert assessment.index_gap_pct == Decimal("5")
+
+
+def test_books_that_trade_at_the_same_price_outweigh_an_index_that_does_not():
+    # BingX's index for ONE sat 31 % from its own book, which traded within 0.14 % of Binance's.
+    a = instrument("binance", "ONEUSDT", "ONE")
+    b = instrument("bingx", "ONE-USDT", "ONE", min_notional_usd="0")
+    assessment = assess_pair(a, b, Quote(mark=D("0.0022517"), index=D("0.0023260")), Quote(mark=D("0.0022486"), index=D("0.0017730")))
+    assert assessment.suspicious_reason is None
 
 
 def test_missing_data_is_a_reason_not_a_pass():

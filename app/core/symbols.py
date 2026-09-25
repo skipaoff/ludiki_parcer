@@ -89,6 +89,8 @@ def same_asset_verdict(
     index_a: Decimal | None,
     index_b: Decimal | None,
     max_index_diff_pct: Decimal,
+    price_a: Decimal | None = None,
+    price_b: Decimal | None = None,
 ) -> str | None:
     """
     Decide whether two contracts track the same asset by their per-token index prices.
@@ -96,9 +98,17 @@ def same_asset_verdict(
     Returns None when they match, otherwise a short reason code for the "suspicious" flag.
     Index prices come from spot markets, so the same token has almost identical indices on
     both exchanges even when the perpetual prices diverge — that divergence is the real gap.
+
+    An index can also simply be wrong. BingX published an index for ONE 31 % away from the price
+    its own book traded at, which sat within 0.14 % of Binance's (25.09.2026), and that one feed
+    hid every BingX pair of the coin. Two contracts whose traded prices sit on top of each other
+    are one asset whatever their index feeds say, so prices that agree within the same allowance
+    overrule the indices. Measured that day: 177 pairs, among them ENA, TAO, GRASS and FLOW.
     """
     if index_a is None or index_b is None or index_a <= 0 or index_b <= 0:
         return "index_missing"
     if price_gap_pct(index_a, index_b) > max_index_diff_pct:
+        if price_a and price_b and price_a > 0 and price_b > 0 and price_gap_pct(price_a, price_b) <= max_index_diff_pct:
+            return None
         return "index_mismatch"
     return None
