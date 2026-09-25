@@ -104,7 +104,9 @@ fast_enter_after_ms = 5000      # ...the gap only has to hold this long. 0 in th
 exit_hysteresis_pct = 0.10
 exit_after_ms = 2000
 default_taker_fee_binance_pct = 0.05   # used until an accepted key check reports the account rate
-default_taker_fee_mexc_pct = 0.05
+default_taker_fee_mexc_pct = 0.08     # API-торговля на MEXC тарифицируется отдельно: 0,05% на запуске,
+                                      # 0,06% с 01.05.2026, 0,08% с 01.06.2026. Ставка аккаунта, если биржа её
+                                      # отдаст после проверки ключа, заменяет это значение
 default_taker_fee_gate_pct = 0.075     # Gate contract default taker rate
 default_taker_fee_aster_pct = 0.035    # Aster Pro taker rate
 default_taker_fee_bingx_pct = 0.05     # BingX contract default taker rate

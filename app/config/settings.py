@@ -169,7 +169,7 @@ class FeedSettings(_Section):
     exit_hysteresis_pct: Decimal = Field(default=Decimal("0.10"), ge=0)
     exit_after_ms: int = Field(default=2000, ge=0)
     default_taker_fee_binance_pct: Decimal = Field(default=Decimal("0.05"), ge=0)
-    default_taker_fee_mexc_pct: Decimal = Field(default=Decimal("0.05"), ge=0)
+    default_taker_fee_mexc_pct: Decimal = Field(default=Decimal("0.08"), ge=0)
     default_taker_fee_gate_pct: Decimal = Field(default=Decimal("0.075"), ge=0)
     default_taker_fee_aster_pct: Decimal = Field(default=Decimal("0.035"), ge=0)
     default_taker_fee_bingx_pct: Decimal = Field(default=Decimal("0.05"), ge=0)
