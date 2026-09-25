@@ -325,6 +325,20 @@ a.chip:hover {
   font-weight: 400;
 }
 
+.settings input.field {
+  width: 4.5rem;
+  padding: 0.1rem 0.3rem;
+  color: var(--fg);
+  background: transparent;
+  border: 1px solid var(--line);
+  font: inherit;
+  text-align: right;
+}
+
+.settings input.field.narrow {
+  width: 3.5rem;
+}
+
 .settings .row {
   display: flex;
   justify-content: space-between;

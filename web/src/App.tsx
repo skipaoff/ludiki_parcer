@@ -4,7 +4,7 @@
 // 1. Routine technical figures in the header — pings and link states live in Settings; the header speaks only when something is down.
 // 2. Colour without meaning — green and red mark money made and lost, blinking and red mark alarms.
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { exchangeTitle, ExchangesSettings } from "./Exchanges";
 import { FeedScreen } from "./Feed";
 import { clock, describe, uptime } from "./format";
@@ -12,6 +12,7 @@ import { PairsScreen } from "./Pairs";
 import { StatsScreen } from "./Stats";
 import { TradesScreen } from "./Trades";
 import { useLive, type LinkState } from "./live";
+import { announcement, askPermission, loadPrefs, permission, savePrefs, show, type NotifyPrefs, type Permission } from "./notify";
 import { apiGet, apiSend } from "./session";
 import { fastTrading } from "./trading";
 import type { ExchangeState, JournalEvent, Snapshot, TradingStatus } from "./types";
@@ -32,6 +33,8 @@ export function App({ token }: { token: string }) {
   const [journalOpen, setJournalOpen] = useState(false);
   const live = useLive(token, history);
   const now = useNow(1000);
+  const [notify, setNotify] = useState<NotifyPrefs>(loadPrefs);
+  useNotifications(live.events, notify);
 
   useEffect(() => {
     apiGet<{ events: JournalEvent[] }>("/api/journal?limit=500", token)
@@ -75,7 +78,18 @@ export function App({ token }: { token: string }) {
         {tab === "trades" && <TradesScreen token={token} />}
         {tab === "stats" && <StatsScreen token={token} recordedLive={live.snapshot?.history?.recorded} />}
         {tab === "pairs" && <PairsScreen token={token} summary={live.snapshot?.instruments} />}
-        {tab === "settings" && <SettingsScreen token={token} snapshot={live.snapshot} now={now} />}
+        {tab === "settings" && (
+          <SettingsScreen
+            token={token}
+            snapshot={live.snapshot}
+            now={now}
+            notify={notify}
+            onNotify={(prefs) => {
+              setNotify(prefs);
+              savePrefs(prefs);
+            }}
+          />
+        )}
       </main>
 
       {journalOpen && <JournalPanel events={live.events} onClose={() => setJournalOpen(false)} />}
@@ -95,6 +109,26 @@ export function App({ token }: { token: string }) {
       </footer>
     </div>
   );
+}
+
+/**
+ * Shows a notification for events that arrived after this tab opened. The journal is also loaded as history,
+ * and announcing that would greet every reload with a wall of old gaps.
+ */
+function useNotifications(events: JournalEvent[], prefs: NotifyPrefs) {
+  const openedAt = useRef(Date.now());
+  const seen = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    for (const event of events) {
+      const id = `${event.ts_ms}|${event.source}|${event.type}|${String(event.payload.key ?? event.trade_id ?? "")}`;
+      if (seen.current.has(id)) continue;
+      if (seen.current.size > 2000) seen.current.clear();
+      seen.current.add(id);
+      if (event.ts_ms < openedAt.current) continue;
+      const announce = announcement(event, prefs, Date.now(), document.hidden);
+      if (announce) show(announce, prefs);
+    }
+  }, [events, prefs]);
 }
 
 function Heartbeat({ lastMessageMs, live, now }: { lastMessageMs: number; live: boolean; now: number }) {
@@ -175,7 +209,83 @@ function FastTradingSwitch({ token, trading }: { token: string; trading: Trading
   );
 }
 
-function SettingsScreen({ token, snapshot, now }: { token: string; snapshot: Snapshot | null; now: number }) {
+function NotificationSettings({ prefs, onChange }: { prefs: NotifyPrefs; onChange: (prefs: NotifyPrefs) => void }) {
+  const [state, setState] = useState<Permission>(permission);
+  const ask = async () => setState(await askPermission());
+  const toggle = (key: keyof NotifyPrefs) => () => onChange({ ...prefs, [key]: !prefs[key] });
+  if (state === "unsupported") {
+    return <p className="muted">Этот браузер не умеет показывать уведомления.</p>;
+  }
+  return (
+    <>
+      <div className="row">
+        <span>разрешение браузера</span>
+        <span>
+          <span className="strong">{state === "granted" ? "ЕСТЬ" : state === "denied" ? "ОТКАЗАНО" : "не спрашивали"}</span>{" "}
+          {state === "default" && (
+            <button className="action" onClick={() => void ask()}>
+              [РАЗРЕШИТЬ]
+            </button>
+          )}
+        </span>
+      </div>
+      {state === "denied" && (
+        <p className="muted">Браузер запомнил отказ: разрешение включается в его настройках сайта, кнопкой отсюда уже нельзя.</p>
+      )}
+      <Switch label="новая пара в ленте" on={prefs.gaps} onToggle={toggle("gaps")} />
+      <Switch label="аварии: потерянная нога, близкая ликвидация, обрыв связи" on={prefs.alarms} onToggle={toggle("alarms")} />
+      <Switch label="только когда вкладка не на экране" on={prefs.onlyHidden} onToggle={toggle("onlyHidden")} />
+      <Switch label="звук" on={prefs.sound} onToggle={toggle("sound")} />
+      <div className="row">
+        <span>минимальный интерес пары</span>
+        <span>
+          <input
+            className="field narrow"
+            inputMode="numeric"
+            value={String(prefs.minInterest)}
+            onChange={(event) => {
+              const value = Number(event.target.value.replace(/[^0-9]/g, "")) || 0;
+              onChange({ ...prefs, minInterest: Math.min(100, value) });
+            }}
+          />{" "}
+          <span className="muted">из 100</span>
+        </span>
+      </div>
+      <p className="muted">
+        Уведомление приходит один раз на пару: повторно — не раньше чем через 10 минут. Настройки запоминаются в этом браузере,
+        разрешение — тоже.
+      </p>
+    </>
+  );
+}
+
+function Switch({ label, on, onToggle }: { label: string; on: boolean; onToggle: () => void }) {
+  return (
+    <div className="row">
+      <span>{label}</span>
+      <span>
+        <span className="strong">{on ? "ВКЛ" : "выкл"}</span>{" "}
+        <button className="action" onClick={onToggle}>
+          {on ? "[ВЫКЛЮЧИТЬ]" : "[ВКЛЮЧИТЬ]"}
+        </button>
+      </span>
+    </div>
+  );
+}
+
+function SettingsScreen({
+  token,
+  snapshot,
+  now,
+  notify,
+  onNotify,
+}: {
+  token: string;
+  snapshot: Snapshot | null;
+  now: number;
+  notify: NotifyPrefs;
+  onNotify: (prefs: NotifyPrefs) => void;
+}) {
   return (
     <div className="settings">
       <ExchangesSettings token={token} live={snapshot?.exchanges} />
@@ -228,7 +338,7 @@ function SettingsScreen({ token, snapshot, now }: { token: string; snapshot: Sna
       </section>
       <section>
         <h2>Уведомления</h2>
-        <p className="muted">После MVP.</p>
+        <NotificationSettings prefs={notify} onChange={onNotify} />
       </section>
       {snapshot && (
         <section>
