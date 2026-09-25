@@ -429,9 +429,16 @@ async def _serve(
         if open_browser:
             await asyncio.to_thread(webbrowser.open, f"{url}/#t={token}")
         else:
-            # Nobody will read an address bar here: the link with its session token has to come from the log,
-            # which is how a terminal on a server is opened through an SSH tunnel.
-            log.info("open the interface at %s/#t=%s", url, token)
+            # Nobody will read an address bar here, and the log is no place for a token: the link goes to a file
+            # only this user can read, which is how a terminal on a server is opened through an SSH tunnel.
+            link = settings.paths.data_dir / "session-url.txt"
+            try:
+                link.parent.mkdir(parents=True, exist_ok=True)
+                link.write_text(f"{url}/#t={token}\n", encoding="utf-8")
+                link.chmod(0o600)
+                log.info("the interface link with its session token is in %s", link)
+            except OSError as exc:
+                log.warning("could not write %s: %s", link, exc)
         # asyncio.wait, not await: cancelling the main task must not cancel the server mid-request.
         await asyncio.wait({server_task})
     finally:
