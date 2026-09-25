@@ -26,7 +26,6 @@ interface Filters {
   capacityMin: string;
   showSuspicious: boolean;
   showReadOnly: boolean;
-  showLongStanding: boolean;
   /** Exchanges to watch. Empty means every one of them; a row passes when both its legs are here. */
   exchanges: string[];
   search: string;
@@ -46,16 +45,16 @@ const DEFAULT_FILTERS: Filters = {
   // Off by default: of the 71 recorded gaps above 2 %, 43 had a Variational leg and not one of them could be
   // opened. They crowded the top of the screen with numbers nobody can take.
   showReadOnly: false,
-  // Off by default. Of 941 recorded gaps (25.09.2026) the median left the feed after 171 s and nine in ten
-  // within 25 minutes; what stays longer does not converge at all. PENG on mexc/bybit stood 15 hours across
-  // 43 appearances since 21.09 and never closed. Such a discrepancy is the state of the market, not news.
-  showLongStanding: false,
   exchanges: [],
   search: "",
   sort: "total",
 };
 
-/** A gap in the feed longer than this is a standing discrepancy: past the 90th percentile of everything recorded. */
+/**
+ * A gap standing longer than this leaves the feed for the section of its own. Of 941 recorded gaps (25.09.2026)
+ * the median left the feed after 171 s and nine in ten within 25 minutes; what stays longer does not converge at
+ * all. PENG on mexc/bybit stood 15 hours across 43 appearances since 21.09 and never closed.
+ */
 const LONG_STANDING_MS = 30 * 60 * 1000;
 
 const READ_ONLY = new Set(["variational"]);
@@ -527,6 +526,8 @@ function GapTable({
 export function FeedScreen({ token, snapshot }: { token: string; snapshot: Snapshot | null }) {
   const [filters, setFilters] = useState<Filters>(loadFilters);
   const [tradeMessage, setTradeMessage] = useState<string | null>(null);
+  // Folded by default: the section is a place to look things up, not a second feed.
+  const [openStanding, setOpenStanding] = useState(false);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   // The table takes one snapshot every REFRESH_MS: at the socket's rate the numbers twitch on every row and
   // the screen cannot be read. The price of that is age, so the section says out loud when its numbers were taken.
@@ -572,7 +573,7 @@ export function FeedScreen({ token, snapshot }: { token: string; snapshot: Snaps
   const sizeUsd = settings?.size_usd ?? "—";
   const enterAfterMs = settings?.enter_after_ms ?? 0;
 
-  const { feedGroups, radarGroups, manualGroups, hiddenRows } = useMemo(() => {
+  const { feedGroups, radarGroups, standingGroups, manualGroups, hiddenRows } = useMemo(() => {
     const number = (value: string, fallback: number) => (value.trim() === "" ? fallback : Number(value));
     const roiMin = number(filters.roiMin, -Infinity);
     const roiMax = number(filters.roiMax, Infinity);
@@ -609,7 +610,6 @@ export function FeedScreen({ token, snapshot }: { token: string; snapshot: Snaps
       if (watched.size > 0 && !(watched.has(row.long?.exchange ?? "") && watched.has(row.short?.exchange ?? ""))) {
         return drop("биржа не выбрана");
       }
-      if (!filters.showLongStanding && standingMs(row) > LONG_STANDING_MS) return drop("давно висят");
       if (!filters.showReadOnly && (READ_ONLY.has(row.long?.exchange ?? "") || READ_ONLY.has(row.short?.exchange ?? ""))) {
         return drop("без торговли");
       }
@@ -619,19 +619,27 @@ export function FeedScreen({ token, snapshot }: { token: string; snapshot: Snaps
     // Pairs the API refuses orders on live in their own section: they are worth seeing and cannot be clicked,
     // so mixing them into the feed would put unopenable rows above openable ones.
     const byHand = (row: FeedRow) => row.manual_only;
+    // A discrepancy that has stood for hours is not news and is not junk either: it leaves the feed for a
+    // section of its own, where it is looked at deliberately rather than read every ten seconds.
+    const standing = (row: FeedRow) => standingMs(row) > LONG_STANDING_MS;
     // Every row passes the filter exactly once, so the hidden count is a count of rows and not of passes.
     const keptFeed = (feed?.rows ?? []).filter((row) => keep(row, capacityMin));
     const keptRadar = (feed?.radar ?? []).filter((row) => keep(row, radarCapacityMin));
-    const feedRows = keptFeed.filter((row) => !byHand(row));
-    const radarRows = keptRadar.filter((row) => !byHand(row));
+    const feedRows = keptFeed.filter((row) => !byHand(row) && !standing(row));
+    const radarRows = keptRadar.filter((row) => !byHand(row) && !standing(row));
+    const standingRows = [...keptFeed, ...keptRadar].filter((row) => !byHand(row) && standing(row));
     const manualRows = [...keptFeed, ...keptRadar].filter(byHand);
     const feedTokens = new Set(feedRows.map((row) => row.token));
     // A coin in the feed lists its other pairs that are above the threshold right now; its head is always a feed gap.
     const feedKeys = new Set(feedRows.map((row) => row.key));
     const aboveThreshold = radarRows.filter((row) => feedTokens.has(row.token) && row.roi_net_pct !== null && Number(row.roi_net_pct) >= minRoi);
+    // A coin leads with a row that says something. PENG kept standing in the radar on three pairs with no book
+    // and no number at all, while the two that carried its spread had already moved to the standing section.
+    const measured = (row: FeedRow) => row.roi_net_pct !== null;
     return {
       feedGroups: groupByToken([...feedRows, ...aboveThreshold], filters.sort, (row) => feedKeys.has(row.key)),
-      radarGroups: groupByToken(radarRows.filter((row) => !feedTokens.has(row.token)), filters.sort),
+      radarGroups: groupByToken(radarRows.filter((row) => !feedTokens.has(row.token)), filters.sort, measured),
+      standingGroups: groupByToken(standingRows, filters.sort, measured),
       manualGroups: groupByToken(manualRows, filters.sort),
       hiddenRows: [...hidden.entries()].sort((a, b) => b[1] - a[1]),
     };
@@ -735,13 +743,6 @@ export function FeedScreen({ token, snapshot }: { token: string; snapshot: Snaps
               <input type="checkbox" checked={filters.showReadOnly} onChange={(event) => set("showReadOnly", event.target.checked)} />{" "}
               без торговли
             </label>
-            <label
-              className="check-label"
-              title="Вилки, которые за последние сутки простояли в ленте дольше получаса — считается по записанной истории, поэтому перезапуск терминала их не возвращает. Из 941 записанной вилки половина уходила за три минуты, девять из десяти — за 25; то, что стоит дольше, обычно не сходится вовсе: разные индексы, закрытые переводы, акции вне торговой сессии."
-            >
-              <input type="checkbox" checked={filters.showLongStanding} onChange={(event) => set("showLongStanding", event.target.checked)} />{" "}
-              давно висят
-            </label>
             <span
               className="muted"
               title="какие биржи смотрим. Пара попадает в ленту, только если обе её ноги на отмеченных биржах. Ничего не отмечено — смотрим все"
@@ -817,6 +818,23 @@ export function FeedScreen({ token, snapshot }: { token: string; snapshot: Snaps
               </span>
             </div>
             <GapTable groups={inHeldOrder(radarGroups, "radar")} scope="radar" {...common} />
+          </div>
+        )}
+
+        {standingGroups.length > 0 && (
+          <div className={openStanding ? "feed-pane" : "feed-pane folded"}>
+            <div className="toolbar section-title">
+              <span>
+                <button className="tab" type="button" onClick={() => setOpenStanding(!openStanding)}>
+                  <span className="chip">СТОЯТ ДАВНО</span> <span className="muted">{standingGroups.length}</span> {openStanding ? "▾" : "▸"}
+                </button>{" "}
+                <span className="muted">
+                  разрыв держится часами и сам не сходится: чаще всего у бирж разные индексы, закрыт перевод монеты или
+                  акция вне торговой сессии. Стоит перепроверить причину, прежде чем брать
+                </span>
+              </span>
+            </div>
+            {openStanding && <GapTable groups={inHeldOrder(standingGroups, "standing")} scope="standing" {...common} />}
           </div>
         )}
 
