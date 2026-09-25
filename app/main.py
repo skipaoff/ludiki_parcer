@@ -469,7 +469,12 @@ def main(argv: list[str] | None = None) -> int:
     token = None if args.new_session else keystore.get(SESSION_TOKEN)
     if not token:
         token = secrets.token_urlsafe(32)
-        keystore.set(SESSION_TOKEN, token)
+        try:
+            keystore.set(SESSION_TOKEN, token)
+        except PermissionError:
+            # A server reads its secrets from the environment and stores nothing: the token lives for this run
+            # and is printed below, which is how it is read from the service log.
+            log.info("session token is not stored on this machine; it changes at every restart")
     try:
         asyncio.run(_serve(settings, keystore, redactor, token, open_browser), loop_factory=loop_factory())
     except KeyboardInterrupt:

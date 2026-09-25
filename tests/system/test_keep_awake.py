@@ -50,3 +50,16 @@ def test_a_caffeinate_that_refuses_to_start_is_not_counted_as_held():
     awake.hold()
 
     assert not awake.held
+
+
+def test_a_read_only_keystore_refuses_writes_with_an_actionable_message():
+    """On a server the terminal reads secrets and stores none; the refusal must say what to do."""
+    from app.keystore.keystore import EnvironmentBackend
+
+    backend = EnvironmentBackend()
+    try:
+        backend.set_password("ludik", "session:token", "x")
+    except PermissionError as refusal:
+        assert "LUDIK_SESSION_TOKEN" in str(refusal)
+    else:
+        raise AssertionError("writing to the environment backend must be refused")
