@@ -10,7 +10,7 @@ import { clock } from "./format";
 import { rateText, settlementTimers, signClass, signedPct, signedUsd } from "./money";
 import { PortfolioColumn } from "./Portfolio";
 import { apiSend } from "./session";
-import { explainFailure, reasonText, tradingAction } from "./trading";
+import { confirmed, explainFailure, fastTrading, reasonText, tradingAction } from "./trading";
 import type { FeedRow, FeedView, Snapshot } from "./types";
 
 type SortKey = "total" | "profit";
@@ -262,11 +262,25 @@ function SettingsForm({
   );
 }
 
-function OpenButton({ token, row, onResult }: { token: string; row: FeedRow; onResult: (message: string | null) => void }) {
+function OpenButton({
+  token,
+  row,
+  fast,
+  onResult,
+}: {
+  token: string;
+  row: FeedRow;
+  fast: boolean;
+  onResult: (message: string | null) => void;
+}) {
   const [sending, setSending] = useState(false);
   const blocks = row.open_blocks ?? ["trading_disabled"];
   const blocked = blocks.length > 0 || sending;
+  const question =
+    `Открыть ${row.token}: лонг ${row.long?.exchange.toUpperCase() ?? "?"}, шорт ${row.short?.exchange.toUpperCase() ?? "?"}` +
+    `\nРазмер $${row.size_usd ?? "?"} на ногу, итог ${row.total_pct ?? "?"}%.\nОрдера уйдут по рынку.`;
   const open = async () => {
+    if (!confirmed(fast, question)) return;
     setSending(true);
     onResult(null);
     try {
@@ -337,6 +351,7 @@ function GapLine({
   token,
   horizonH,
   sizeUsd,
+  fast,
   now,
   onResult,
 }: {
@@ -348,6 +363,7 @@ function GapLine({
   token: string;
   horizonH: string;
   sizeUsd: string;
+  fast: boolean;
   now: number;
   onResult: (message: string | null) => void;
 }) {
@@ -400,7 +416,7 @@ function GapLine({
         <span className={signClass(row.total_pct)}>{signedPct(row.total_pct)}</span>
       </td>
       <td>
-        <OpenButton token={token} row={row} onResult={onResult} />
+        <OpenButton token={token} row={row} fast={fast} onResult={onResult} />
       </td>
     </tr>
   );
@@ -414,6 +430,7 @@ function GapTable({
   token,
   horizonH,
   sizeUsd,
+  fast,
   now,
   onResult,
 }: {
@@ -424,10 +441,11 @@ function GapTable({
   token: string;
   horizonH: string;
   sizeUsd: string;
+  fast: boolean;
   now: number;
   onResult: (message: string | null) => void;
 }) {
-  const common = { token, horizonH, sizeUsd, now, onResult };
+  const common = { token, horizonH, sizeUsd, fast, now, onResult };
   return (
     <table className="grid feed-table">
       <thead>
@@ -595,7 +613,8 @@ export function FeedScreen({ token, snapshot }: { token: string; snapshot: Snaps
   const touched = (Object.keys(DEFAULT_FILTERS) as (keyof Filters)[]).some(
     (key) => key !== "sort" && filters[key] !== DEFAULT_FILTERS[key],
   );
-  const common = { expanded, toggle, token, horizonH, sizeUsd, now, onResult: setTradeMessage };
+  const fast = fastTrading(snapshot?.trading);
+  const common = { expanded, toggle, token, horizonH, sizeUsd, fast, now, onResult: setTradeMessage };
 
   return (
     <div className="gaps">

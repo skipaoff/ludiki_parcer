@@ -690,6 +690,13 @@ class ExecutionService:
     def annotate(self, rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
         return [{**row, "open_blocks": self.open_blocks_for(row["key"])} for row in rows]
 
+    def settings(self) -> TradingSettings:
+        return self._settings
+
+    def apply_settings(self, settings: TradingSettings) -> None:
+        """Takes effect on the next click; nothing in flight changes its mind halfway."""
+        self._settings = settings
+
     def status(self) -> dict[str, Any]:
         now = self._clock_ms()
         return {
@@ -705,5 +712,6 @@ class ExecutionService:
                 "max_open_pairs": self._settings.max_open_pairs,
                 "max_total_usd": str(self._settings.max_total_usd),
                 "margin_buffer_pct": str(self._settings.margin_buffer_pct),
+                "fast_trading": self._settings.fast_trading,
             },
         }

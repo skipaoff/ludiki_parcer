@@ -45,6 +45,7 @@ from app.market.variational_market import VariationalMarket
 from app.market.state import MarketState
 from app.market.radar_recorder import RadarRecorder
 from app.execution.service import ExecutionService
+from app.execution.settings import TradingSettingsService
 from app.market.private_streams import OrderEvents, PrivateStreams
 from app.portfolio.service import PortfolioService
 from app.system.keep_awake import KeepAwake
@@ -222,6 +223,7 @@ async def _serve(
         order_events=order_events,
         funding=funding.rate,
     )
+    trading_settings = TradingSettingsService(execution, database, journal)
     private_streams = PrivateStreams(
         exchanges.adapter,
         order_events,
@@ -296,6 +298,7 @@ async def _serve(
         exchanges=exchanges,
         instruments=instruments,
         feed_settings=feed_settings,
+        trading_settings=trading_settings,
         history=History(),
         portfolio=portfolio,
         execution=execution,
@@ -316,6 +319,7 @@ async def _serve(
     journal.emit(Level.INFO, "app", "started", version=VERSION, pid=os.getpid())
     await writer.flush(force_connect=True)
     await feed_settings.load()
+    await trading_settings.load()
     if database.ready:
         closed = await history_queries.close_dangling_episodes(database.pool)
         if closed:

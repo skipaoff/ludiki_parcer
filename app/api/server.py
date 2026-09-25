@@ -32,6 +32,8 @@ from app.core.schemas import LegSide
 from app.execution.service import ExecutionService, TradingError
 from app.portfolio.service import PortfolioError, PortfolioService
 from app.storage.trades_history import TradeFilter
+from app.execution.settings import InvalidSetting as InvalidTradingSetting
+from app.execution.settings import TradingSettingsService
 from app.strategies.price_gap.settings import FeedSettingsService, InvalidSetting
 
 APP_NAME = "terminal-ludik"
@@ -71,6 +73,7 @@ class ApiContext:
     history: HistoryQueries | None = None
     portfolio: PortfolioService | None = None
     execution: ExecutionService | None = None
+    trading_settings: TradingSettingsService | None = None
 
 
 def allowed_origins(server: ServerSettings) -> frozenset[str]:
@@ -284,6 +287,23 @@ def create_app(server: ServerSettings, web_dist: Path, context: ApiContext) -> F
             return await call
         except TradingError as exc:
             raise HTTPException(status_code=409, detail={"reasons": exc.reasons}) from None
+
+    def trading_settings() -> TradingSettingsService:
+        if context.trading_settings is None:
+            raise HTTPException(status_code=503, detail="trading settings are not available")
+        return context.trading_settings
+
+    @app.get("/api/trading/settings", dependencies=[Depends(require_token)])
+    async def get_trading_settings() -> dict[str, str]:
+        return trading_settings().current()
+
+    @app.put("/api/trading/settings", dependencies=[Depends(require_token)])
+    async def put_trading_settings(request: Request) -> dict[str, str]:
+        body = await json_body(request)
+        try:
+            return await trading_settings().update(body)
+        except InvalidTradingSetting as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from None
 
     @app.get("/api/trading/status", dependencies=[Depends(require_token)])
     async def trading_status() -> dict[str, Any]:

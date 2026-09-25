@@ -12,8 +12,9 @@ import { PairsScreen } from "./Pairs";
 import { StatsScreen } from "./Stats";
 import { TradesScreen } from "./Trades";
 import { useLive, type LinkState } from "./live";
-import { apiGet } from "./session";
-import type { ExchangeState, JournalEvent, Snapshot } from "./types";
+import { apiGet, apiSend } from "./session";
+import { fastTrading } from "./trading";
+import type { ExchangeState, JournalEvent, Snapshot, TradingStatus } from "./types";
 
 type TabId = "gaps" | "trades" | "stats" | "pairs" | "settings";
 
@@ -141,6 +142,39 @@ function LinkBanner({ link, alarm }: { link: LinkState; alarm: boolean }) {
   return <div className={alarm ? "banner alarm blink" : "banner blink"}>{text}</div>;
 }
 
+function FastTradingSwitch({ token, trading }: { token: string; trading: TradingStatus }) {
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const fast = fastTrading(trading);
+  const toggle = async () => {
+    setSaving(true);
+    setError(null);
+    try {
+      await apiSend("PUT", "/api/trading/settings", token, { fast_trading: !fast });
+    } catch (failure) {
+      setError(failure instanceof Error ? failure.message : String(failure));
+    } finally {
+      setSaving(false);
+    }
+  };
+  return (
+    <>
+      <div className="row">
+        <span title="включена: «Открыть» и «Закрыть» отправляют ордера сразу; выключена: сначала спрашивает">
+          быстрая торговля
+        </span>
+        <span>
+          <span className="strong">{fast ? "ВКЛЮЧЕНА" : "выключена"}</span>{" "}
+          <button className="action" disabled={saving} onClick={() => void toggle()}>
+            {saving ? "[…]" : fast ? "[СПРАШИВАТЬ]" : "[БЕЗ ВОПРОСОВ]"}
+          </button>
+        </span>
+      </div>
+      {error && <p className="level-warning">{error}</p>}
+    </>
+  );
+}
+
 function SettingsScreen({ token, snapshot, now }: { token: string; snapshot: Snapshot | null; now: number }) {
   return (
     <div className="settings">
@@ -153,12 +187,15 @@ function SettingsScreen({ token, snapshot, now }: { token: string; snapshot: Sna
               <span>торговля</span>
               <span className="strong">{snapshot.trading.enabled ? "ВКЛЮЧЕНА" : "выключена"}</span>
             </div>
-            {Object.entries(snapshot.trading.settings).map(([key, value]) => (
-              <div className="row" key={key}>
-                <span>{key}</span>
-                <span>{typeof value === "object" ? JSON.stringify(value) : String(value)}</span>
-              </div>
-            ))}
+            <FastTradingSwitch token={token} trading={snapshot.trading} />
+            {Object.entries(snapshot.trading.settings)
+              .filter(([key]) => key !== "fast_trading")
+              .map(([key, value]) => (
+                <div className="row" key={key}>
+                  <span>{key}</span>
+                  <span>{typeof value === "object" ? JSON.stringify(value) : String(value)}</span>
+                </div>
+              ))}
             <div className="row">
               <span>плечо и маржа выставлены для контрактов</span>
               <span>{snapshot.trading.warmed}</span>
@@ -177,8 +214,8 @@ function SettingsScreen({ token, snapshot, now }: { token: string; snapshot: Sna
               </p>
             ))}
             <p className="muted">
-              Включение, плечо и риск-лимиты задаются в config.toml, раздел [trading], и применяются после перезапуска. Размер на ногу
-              и порог ленты меняются над лентой.
+              Включение торговли, плечо и риск-лимиты задаются в config.toml, раздел [trading], и применяются после перезапуска.
+              Быстрая торговля меняется здесь и действует сразу. Размер на ногу и порог ленты меняются над лентой.
             </p>
           </>
         ) : (

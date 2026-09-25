@@ -149,6 +149,8 @@ one_pair_per_token = true
 margin_buffer_pct = 20          # free margin must cover size / leverage plus this buffer on each exchange
 status_query_attempts = 10      # an order with unknown outcome is queried this many times...
 status_query_interval_ms = 1000 # ...this far apart, before the pair stays "opening" with an alarm
+fast_trading = true             # one click opens or closes a pair. false asks for confirmation first;
+                                # the switch is also in Настройки → Торговля and applies without a restart
 close_attempts = 3
 close_retry_pause_ms = 300
 maintenance_block_s = 60        # after a maintenance answer the exchange is blocked for new pairs this long
