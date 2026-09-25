@@ -26,7 +26,6 @@ interface Filters {
   capacityMin: string;
   showSuspicious: boolean;
   showReadOnly: boolean;
-  showLongStanding: boolean;
   /** Exchanges to watch. Empty means every one of them; a row passes when both its legs are here. */
   exchanges: string[];
   search: string;
@@ -46,16 +45,16 @@ const DEFAULT_FILTERS: Filters = {
   // Off by default: of the 71 recorded gaps above 2 %, 43 had a Variational leg and not one of them could be
   // opened. They crowded the top of the screen with numbers nobody can take.
   showReadOnly: false,
-  // Off by default. Of 941 recorded gaps (25.09.2026) the median left the feed after 171 s and nine in ten
-  // within 25 minutes; what stays longer does not converge at all. PENG on mexc/bybit stood 15 hours across
-  // 43 appearances since 21.09 and never closed. Such a discrepancy is the state of the market, not news.
-  showLongStanding: false,
   exchanges: [],
   search: "",
   sort: "total",
 };
 
-/** A gap in the feed longer than this is a standing discrepancy: past the 90th percentile of everything recorded. */
+/**
+ * A gap standing longer than this — in this run or over the recorded day — has its coin marked in colour. Of 941
+ * recorded gaps (25.09.2026) the median left the feed after 171 s and nine in ten within 25 minutes; what stays
+ * longer does not converge at all. PENG on mexc/bybit stood 15 hours across 43 appearances and never closed.
+ */
 const LONG_STANDING_MS = 30 * 60 * 1000;
 
 const READ_ONLY = new Set(["variational"]);
@@ -401,6 +400,16 @@ function GapLine({
   onResult: (message: string | null) => void;
 }) {
   const dim = row.total_pct === null;
+  // A gap that has stood for hours stays where it is and says so in its colour: it is the state of the market
+  // rather than a chance, and the age is one hover away.
+  const standing = standingMs(row) > LONG_STANDING_MS;
+  const name = standing ? (
+    <span className="stale" title={`стоит в ленте ${ageText(standingMs(row))} за последние сутки — такие обычно не сходятся`}>
+      {row.token}
+    </span>
+  ) : (
+    row.token
+  );
   return (
     <tr className={dim ? "muted" : ""}>
       <td className="left strong">
@@ -408,28 +417,17 @@ function GapLine({
           // The branch glyph that used to stand here reads as a letter L in a monospace font; the ticker,
           // greyed against the bold head above it, says the same thing and cannot be misread.
           <span className="muted" title={`ещё одна пара по монете ${row.token}`}>
-            {row.token}
+            {name}
           </span>
         ) : others > 0 ? (
           <button className="coin" onClick={onToggle} title={expanded ? "скрыть другие пары" : `ещё пар по монете: ${others}`}>
-            {row.token} {expanded ? "▾" : "▸"}
+            {name} {expanded ? "▾" : "▸"}
             <span className="muted">{others}</span>
           </button>
         ) : (
-          row.token
+          name
         )}
         {row.suspicious ? " ?" : ""}
-        {standingMs(row) > LONG_STANDING_MS && (
-          // A gap this old is the state of the market rather than a chance: it is shown with its age.
-          <span
-            className="chip chip-note"
-            title={`столько эта вилка стоит в ленте за последние сутки — такие обычно не сходятся${
-              row.in_feed_ms ? `; в этом запуске ${ageText(row.in_feed_ms)}` : ""
-            }`}
-          >
-            {ageText(standingMs(row))}
-          </span>
-        )}
       </td>
       <td className="left">
         <Leg leg={row.long} side="long" decimals={priceDecimals(row)} />
@@ -609,7 +607,6 @@ export function FeedScreen({ token, snapshot }: { token: string; snapshot: Snaps
       if (watched.size > 0 && !(watched.has(row.long?.exchange ?? "") && watched.has(row.short?.exchange ?? ""))) {
         return drop("биржа не выбрана");
       }
-      if (!filters.showLongStanding && standingMs(row) > LONG_STANDING_MS) return drop("давно висят");
       if (!filters.showReadOnly && (READ_ONLY.has(row.long?.exchange ?? "") || READ_ONLY.has(row.short?.exchange ?? ""))) {
         return drop("без торговли");
       }
@@ -734,13 +731,6 @@ export function FeedScreen({ token, snapshot }: { token: string; snapshot: Snaps
             >
               <input type="checkbox" checked={filters.showReadOnly} onChange={(event) => set("showReadOnly", event.target.checked)} />{" "}
               без торговли
-            </label>
-            <label
-              className="check-label"
-              title="Вилки, которые за последние сутки простояли в ленте дольше получаса — считается по записанной истории, поэтому перезапуск терминала их не возвращает. Из 941 записанной вилки половина уходила за три минуты, девять из десяти — за 25; то, что стоит дольше, обычно не сходится вовсе: разные индексы, закрытые переводы, акции вне торговой сессии."
-            >
-              <input type="checkbox" checked={filters.showLongStanding} onChange={(event) => set("showLongStanding", event.target.checked)} />{" "}
-              давно висят
             </label>
             <span
               className="muted"

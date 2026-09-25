@@ -12,6 +12,7 @@
   --alarm: #ff3b30;
   --gain: #30d158;
   --loss: #ff453a;
+  --stale: #ffb340;
   color-scheme: dark;
 }
 
@@ -221,6 +222,11 @@ a.chip:hover {
 .chip-note {
   margin-left: 0.35em;
   font-size: 0.85em;
+}
+
+/* A coin whose gap has stood for hours: amber, apart from the green and red that mean money. */
+.stale {
+  color: var(--stale);
 }
 
 /* A leg is read as one thing — the venue and what it charges — so it never breaks across lines. */
