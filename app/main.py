@@ -234,7 +234,7 @@ async def _serve(
     telegram: TelegramSender | None = None
     notifier: TelegramNotifier | None = None
     if settings.telegram.enabled:
-        telegram = TelegramSender(keystore.get(TELEGRAM_TOKEN), settings.telegram.chat_id)
+        telegram = TelegramSender(keystore.get(TELEGRAM_TOKEN), settings.telegram.chats)
         notifier = TelegramNotifier(telegram, settings.telegram, lambda: str(engine.settings().funding_horizon_h))
         journal.add_sink(notifier.on_event)
         if telegram.dry_run:

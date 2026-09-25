@@ -51,7 +51,7 @@ def sender(answers=None, token=TOKEN):
     session = FakeSession(calls, list(answers or []))
     made = TelegramSender(
         token,
-        chat_id="-100500",
+        chats=["480399842", "944522988"],
         session_factory=lambda: session,
         sleep=sleep,
         clock=lambda: clock.now,
@@ -71,22 +71,33 @@ async def test_a_gap_message_goes_to_the_chat_with_its_buttons_and_the_id_is_rem
 
     await drain(made)
 
+    assert [payload["chat_id"] for _, payload in calls] == ["480399842", "944522988"]
     url, payload = calls[0]
     assert url == f"https://api.telegram.org/bot{TOKEN}/sendMessage"
-    assert payload["chat_id"] == "-100500" and payload["parse_mode"] == "HTML"
+    assert payload["parse_mode"] == "HTML"
     assert payload["reply_markup"]["inline_keyboard"] == [[{"text": "GATE ↗", "url": "https://gate.example"}]]
-    assert made.message_ids["pair"] == 777 and made.sent == 1
+    assert made.message_ids["pair"] == (("480399842", 777), ("944522988", 777)) and made.sent == 2
 
 
-async def test_the_outcome_edits_the_message_that_announced_the_gap():
+async def test_the_outcome_edits_the_message_in_every_chat_that_got_it():
     made, calls, _ = sender()
-    made.amend(777, "текст\n\n✓ прожила 7 мин")
+    made.amend((("480399842", 777), ("944522988", 778)), "текст\n\n✓ прожила 7 мин")
 
     await drain(made)
 
-    url, payload = calls[0]
-    assert url.endswith("/editMessageText")
-    assert payload["message_id"] == 777 and payload["text"].endswith("✓ прожила 7 мин")
+    assert [(payload["chat_id"], payload["message_id"]) for _, payload in calls] == [("480399842", 777), ("944522988", 778)]
+    assert calls[0][0].endswith("/editMessageText")
+    assert calls[0][1]["text"].endswith("✓ прожила 7 мин")
+
+
+async def test_one_chat_refusing_does_not_rob_the_other():
+    made, calls, _ = sender(answers=[(400, {"ok": False, "description": "chat not found"}), (200, {"ok": True, "result": {"message_id": 9}})])
+    made.post(Message(text="раз"), key="pair")
+
+    await drain(made)
+
+    assert len(calls) == 2 and made.sent == 1 and made.failed == 1
+    assert made.message_ids["pair"] == (("944522988", 9),)
 
 
 async def test_too_many_messages_waits_exactly_as_long_as_telegram_asks():
@@ -95,7 +106,8 @@ async def test_too_many_messages_waits_exactly_as_long_as_telegram_asks():
 
     await drain(made)
 
-    assert 7 in waits and len(calls) == 2 and made.sent == 1
+    # первый адресат получил 429, подождал ровно столько, сколько попросили, и дошёл; второй — сразу
+    assert 7 in waits and len(calls) == 3 and made.sent == 2
 
 
 async def test_a_refusal_that_is_not_about_pace_is_not_retried_forever():
@@ -104,7 +116,7 @@ async def test_a_refusal_that_is_not_about_pace_is_not_retried_forever():
 
     await drain(made)
 
-    assert len(calls) == 1 and made.failed == 1
+    assert len(calls) == 2 and made.failed == 1 and made.sent == 1  # отказ одного, доставка другому
     assert "chat not found" in (made.last_error or "") and TOKEN not in (made.last_error or "")
 
 
@@ -115,7 +127,7 @@ async def test_without_a_token_messages_go_to_the_log_instead_of_the_network():
 
     await drain(made)
 
-    assert calls == [] and made.sent == 1
+    assert calls == [] and made.sent == 2
 
 
 async def test_a_queue_that_cannot_drain_drops_instead_of_growing_without_end():

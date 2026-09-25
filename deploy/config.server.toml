@@ -24,7 +24,7 @@ enabled = false             # сервер в режиме наблюдател�
 
 [telegram]
 enabled = true
-chat_id = ""                # id чата или канала; токен бота — в /etc/ludik/ludik.env
+chats = []                  # id чатов и каналов; токен бота — в /etc/ludik/ludik.env
 min_interest = 0
 quiet_hours = ""
 digest_at = "09:00"

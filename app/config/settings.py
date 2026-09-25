@@ -232,7 +232,8 @@ class TelegramSettings(_Section):
     """Where the terminal reports gaps when nobody is at the screen. The bot token lives in the credential store."""
 
     enabled: bool = False
-    chat_id: str = ""
+    chats: tuple[str, ...] = ()
+    """Кому слать: личные чаты и каналы. Каждый должен сам написать боту или сделать его администратором."""
     min_interest: int = Field(default=0, ge=0, le=100)
     min_total_pct: Decimal | None = None
     quiet_hours: str = ""

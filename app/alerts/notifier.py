@@ -97,12 +97,12 @@ class TelegramNotifier:
         if not self._settings.send_outcome:
             return
         for item in finished:
-            message_id = self._sender.message_ids.pop(item.key, None)
+            sent = self._sender.message_ids.pop(item.key, None)
             text = self._texts.pop(item.key, None)
-            if message_id is None or text is None:
+            if not sent or text is None:
                 continue
             note = closed_note(item.lifetime_ms, item.peak_total_pct, "gone")
-            self._sender.amend(message_id, f"{text}\n\n{note}")
+            self._sender.amend(sent, f"{text}\n\n{note}")
 
     # ── alarms and digest ───────────────────────────────────────────────────
 

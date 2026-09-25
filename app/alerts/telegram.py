@@ -1,11 +1,12 @@
 """
-VFP: Delivery of a ready message to Telegram — one queue, one chat, with the Bot API's own pace respected.
+VFP: Delivery of a ready message to Telegram — one queue, every recipient, with the Bot API's own pace respected.
 Changes when: the Bot API changes or the terminal needs another chat.
 Anti-goal:
 1. Deciding what to send or how it reads — that is core/alerts.py and core/telegram_message.py.
 2. Blocking the terminal on the network: sending is a queue, never awaited by the engine.
-3. Reporting a Telegram failure through Telegram — a broken channel would announce its own breakage forever.
-4. The token in a log, an error or the journal: it lives in the credential store and never leaves this module.
+3. A chat that refuses messages silencing the others — each recipient is delivered to on its own.
+4. Reporting a Telegram failure through Telegram — a broken channel would announce its own breakage forever.
+5. The token in a log, an error or the journal: it lives in the credential store and never leaves this module.
 """
 
 from __future__ import annotations
@@ -14,7 +15,7 @@ import asyncio
 import logging
 import time
 from dataclasses import dataclass
-from typing import Any, Callable
+from typing import Any, Callable, Sequence
 
 from app.core.telegram_message import Message
 from app.system.tls import client_session
@@ -37,7 +38,8 @@ class Post:
 
 @dataclass(frozen=True, slots=True)
 class Amend:
-    message_id: int
+    sent: tuple[tuple[str, int], ...]
+    """(чат, id сообщения) — то же дополнение уходит в каждый чат, где сообщение было."""
     text: str
 
 
@@ -45,13 +47,13 @@ class TelegramSender:
     def __init__(
         self,
         token: str | None,
-        chat_id: str,
+        chats: Sequence[str],
         session_factory: Callable[..., Any] = client_session,
         sleep: Callable[[float], Any] = asyncio.sleep,
         clock: Callable[[], float] = time.time,
     ) -> None:
         self._token = token
-        self._chat_id = chat_id
+        self._chats = [str(chat) for chat in chats if str(chat).strip()]
         self._session_factory = session_factory
         self._sleep = sleep
         self._clock = clock
@@ -61,7 +63,7 @@ class TelegramSender:
         self.failed = 0
         self.dropped = 0
         self.last_error: str | None = None
-        self.message_ids: dict[str, int] = {}
+        self.message_ids: dict[str, tuple[tuple[str, int], ...]] = {}
         self._session: Any | None = None
 
     @property
@@ -72,8 +74,8 @@ class TelegramSender:
     def post(self, message: Message, key: str | None = None) -> None:
         self._enqueue(Post(message, key))
 
-    def amend(self, message_id: int, text: str) -> None:
-        self._enqueue(Amend(message_id, text))
+    def amend(self, sent: tuple[tuple[str, int], ...], text: str) -> None:
+        self._enqueue(Amend(tuple(sent), text))
 
     def _enqueue(self, item: Post | Amend) -> None:
         try:
@@ -87,6 +89,7 @@ class TelegramSender:
         return {
             "enabled": True,
             "dry_run": self.dry_run,
+            "chats": len(self._chats),
             "queued": self._queue.qsize(),
             "sent": self.sent,
             "failed": self.failed,
@@ -125,31 +128,48 @@ class TelegramSender:
 
     async def _deliver(self, item: Post | Amend) -> None:
         if isinstance(item, Post):
-            payload: dict[str, Any] = {
-                "chat_id": self._chat_id,
-                "text": item.message.text,
-                "parse_mode": "HTML",
-                "disable_web_page_preview": True,
-            }
-            if item.message.buttons:
-                payload["reply_markup"] = {
-                    "inline_keyboard": [[{"text": text, "url": url} for text, url in item.message.buttons]]
-                }
-            result = await self._call("sendMessage", payload)
-            if result and item.key:
-                self.message_ids[item.key] = int(result["message_id"])
-        else:
-            await self._call(
-                "editMessageText",
-                {
-                    "chat_id": self._chat_id,
-                    "message_id": item.message_id,
-                    "text": item.text,
+            delivered: list[tuple[str, int]] = []
+            for chat in self._chats:
+                payload: dict[str, Any] = {
+                    "chat_id": chat,
+                    "text": item.message.text,
                     "parse_mode": "HTML",
                     "disable_web_page_preview": True,
-                },
-            )
-        self.sent += 1
+                }
+                if item.message.buttons:
+                    payload["reply_markup"] = {
+                        "inline_keyboard": [[{"text": text, "url": url} for text, url in item.message.buttons]]
+                    }
+                result = await self._one(chat, "sendMessage", payload)
+                if result:
+                    delivered.append((chat, int(result["message_id"])))
+            if item.key and delivered:
+                self.message_ids[item.key] = tuple(delivered)
+        else:
+            for chat, message_id in item.sent:
+                await self._one(
+                    chat,
+                    "editMessageText",
+                    {
+                        "chat_id": chat,
+                        "message_id": message_id,
+                        "text": item.text,
+                        "parse_mode": "HTML",
+                        "disable_web_page_preview": True,
+                    },
+                )
+
+    async def _one(self, chat: str, method: str, payload: dict[str, Any]) -> dict[str, Any] | None:
+        """One recipient: its refusal is counted and logged, and the next recipient still gets the message."""
+        try:
+            result = await self._call(method, payload)
+            self.sent += 1
+            return result
+        except Exception as exc:
+            self.failed += 1
+            self.last_error = f"{chat}: {type(exc).__name__}: {exc}"
+            log.warning("telegram delivery to %s failed: %s", chat, self.last_error)
+            return None
 
     async def _call(self, method: str, payload: dict[str, Any]) -> dict[str, Any] | None:
         if self.dry_run:

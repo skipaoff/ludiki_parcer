@@ -18,10 +18,10 @@ class FakeSender:
     def post(self, message, key=None):
         self.posts.append((message, key))
         if key:
-            self.message_ids[key] = 100 + len(self.posts)
+            self.message_ids[key] = (("480399842", 100 + len(self.posts)), ("944522988", 200 + len(self.posts)))
 
-    def amend(self, message_id, text):
-        self.amends.append((message_id, text))
+    def amend(self, sent, text):
+        self.amends.append((sent, text))
 
     def stats(self):
         return {"sent": len(self.posts)}
@@ -45,7 +45,7 @@ def notifier(clock=datetime(2026, 9, 26, 12, 0), **settings):
     sender = FakeSender()
     made = TelegramNotifier(
         sender,
-        TelegramSettings(enabled=True, chat_id="-100500", **settings),
+        TelegramSettings(enabled=True, chats=("480399842", "944522988"), **settings),
         horizon_h=lambda: "8",
         now=lambda: clock,
     )
@@ -108,8 +108,8 @@ def test_the_outcome_is_appended_to_the_message_that_announced_the_gap():
 
     made.on_finished([FinishedAlert(key="pair", lifetime_ms=420_000, peak_total_pct="2.1000")])
 
-    amended_id, text = sender.amends[0]
-    assert amended_id == message_id
+    amended, text = sender.amends[0]
+    assert amended == message_id
     assert text.startswith(sender.posts[0][0].text)
     assert "✓ прожила 7 мин · максимум был +2.10%" in text
     assert "pair" not in sender.message_ids  # больше нечего дописывать
