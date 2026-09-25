@@ -19,6 +19,7 @@ import socket
 import time
 import urllib.request
 import webbrowser
+from datetime import datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
 from typing import Any
@@ -26,7 +27,9 @@ from typing import Any
 import orjson
 import uvicorn
 
+from app.alerts.notifier import TelegramNotifier
 from app.alerts.service import GapAlerts
+from app.alerts.telegram import TelegramSender
 from app.api.hub import Hub
 from app.api.server import APP_NAME, ApiContext, create_app
 from app.config.settings import REPO_ROOT, Settings, load_settings
@@ -56,9 +59,11 @@ from app.strategies.price_gap.engine import PriceGapEngine
 from app.strategies.price_gap.recorder import EpisodeRecorder
 from app.strategies.price_gap.settings import FeedSettingsService
 from app.journal.journal import Journal, Level
-from app.keystore.keystore import DB_PASSWORD, SESSION_TOKEN, Keystore
+from app.keystore.keystore import DB_PASSWORD, SESSION_TOKEN, TELEGRAM_TOKEN, Keystore
 from app.storage.database import Database
+from app.core.telegram_message import DigestNumbers
 from app.storage.events import recent_events
+from app.storage.history import daily_digest
 from app.storage.spool import Spool
 from app.storage.writer import WriteQueue
 from app.system.event_loop import loop_factory
@@ -225,8 +230,59 @@ async def _serve(
         funding=funding.rate,
     )
     trading_settings = TradingSettingsService(execution, database, journal)
-    # One announcement per gap that just became clickable; the browser turns it into a notification.
-    alerts = GapAlerts(lambda: execution.annotate(engine.view()["rows"]), journal)
+
+    telegram: TelegramSender | None = None
+    notifier: TelegramNotifier | None = None
+    if settings.telegram.enabled:
+        telegram = TelegramSender(keystore.get(TELEGRAM_TOKEN), settings.telegram.chat_id)
+        notifier = TelegramNotifier(telegram, settings.telegram, lambda: str(engine.settings().funding_horizon_h))
+        journal.add_sink(notifier.on_event)
+        if telegram.dry_run:
+            log.warning("telegram is enabled without a bot token: messages go to the log only")
+
+    # One announcement per gap that just became clickable; the browser turns it into a notification,
+    # and Telegram carries it to wherever the owner is.
+    alerts = GapAlerts(
+        lambda: execution.annotate(engine.view()["rows"]),
+        journal,
+        on_alerts=notifier.on_alerts if notifier else None,
+        on_finished=notifier.on_finished if notifier else None,
+    )
+
+    async def run_digest() -> None:
+        """One summary a day at the configured hour; it is skipped when the database cannot answer."""
+        if notifier is None or not settings.telegram.digest_at:
+            return
+        hour, minute = (int(part) for part in settings.telegram.digest_at.split(":", 1))
+        while True:
+            now = datetime.now()
+            due = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
+            if due <= now:
+                due = due + timedelta(days=1)
+            await asyncio.sleep((due - now).total_seconds())
+            if not database.ready:
+                continue
+            try:
+                numbers = await daily_digest(database.pool)
+                best = numbers.get("best") or {}
+                notifier.send_digest(
+                    DigestNumbers(
+                        day=datetime.now().strftime("%d.%m.%Y"),
+                        gaps=int(numbers.get("gaps") or 0),
+                        best_token=best.get("token"),
+                        best_total_pct=None if best.get("peak_pct") is None else str(best["peak_pct"]),
+                        best_lifetime_ms=None if best.get("in_feed_s") is None else int(float(best["in_feed_s"]) * 1000),
+                        median_lifetime_ms=None
+                        if numbers.get("median_in_feed_s") is None
+                        else int(float(numbers["median_in_feed_s"]) * 1000),
+                        converged=int(numbers.get("converged") or 0),
+                        by_pair=tuple((row["pair"], int(row["gaps"])) for row in numbers.get("by_pair", [])),
+                        database_size=numbers.get("database_size"),
+                        uptime_ms=int(time.time() * 1000) - started_ms,
+                    )
+                )
+            except Exception as exc:
+                log.warning("daily digest failed: %s", exc)
     private_streams = PrivateStreams(
         exchanges.adapter,
         order_events,
@@ -274,6 +330,7 @@ async def _serve(
                 "funding": funding.stats(),
             },
             "trading": {**execution.status(), "private_streams": private_streams.connected, "order_events": order_events.received},
+            "telegram": notifier.stats() if notifier else {"enabled": False},
             "history": {
                 "recorded": recorder.recorded,
                 "open": recorder.open_count,
@@ -351,6 +408,7 @@ async def _serve(
         asyncio.create_task(execution.run_warmup()),
         asyncio.create_task(private_streams.run()),
         asyncio.create_task(alerts.run()),
+        *( [asyncio.create_task(telegram.run()), asyncio.create_task(run_digest())] if telegram else [] ),
     ]
     server_task = asyncio.create_task(server.serve())
     try:

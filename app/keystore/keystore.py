@@ -1,5 +1,5 @@
 """
-VFP: Reads and writes secrets in the OS credential store (Windows Credential Manager, macOS keychain) and shows them only masked.
+VFP: Reads and writes secrets in the credential store of the machine — Windows Credential Manager, macOS keychain, or the environment on a server — and shows them only masked.
 Changes when: a new kind of secret appears or the credential store changes.
 Anti-goal:
 1. Secrets in files, the database, logs or API responses — only this module touches raw values.
@@ -10,6 +10,8 @@ Named keystore, not secrets: .gitignore excludes `secrets*` paths.
 
 from __future__ import annotations
 
+import os
+import re
 from typing import Protocol
 
 from app.system.log_setup import SecretRedactor
@@ -17,6 +19,7 @@ from app.system.log_setup import SecretRedactor
 SERVICE = "ludik"
 DB_PASSWORD = "postgres:ludik"
 SESSION_TOKEN = "session:token"
+TELEGRAM_TOKEN = "telegram:bot_token"
 
 
 def api_key_name(exchange: str) -> str:
@@ -49,12 +52,42 @@ def mask(secret: str | None) -> str | None:
     return f"{secret[:4]}…{secret[-4:]}"
 
 
+class EnvironmentBackend:
+    """
+    Secrets from the environment, for a headless server where no desktop credential store exists.
+    `postgres:ludik` reads LUDIK_POSTGRES_LUDIK, `telegram:bot_token` reads LUDIK_TELEGRAM_BOT_TOKEN.
+    Writing is refused on purpose: on a server the owner puts secrets there, not the terminal.
+    """
+
+    prefix = "LUDIK_"
+
+    @staticmethod
+    def variable(name: str) -> str:
+        return EnvironmentBackend.prefix + re.sub(r"[^A-Za-z0-9]+", "_", name).upper()
+
+    def get_password(self, service: str, username: str) -> str | None:
+        return os.environ.get(self.variable(username)) or None
+
+    def set_password(self, service: str, username: str, password: str) -> None:
+        raise PermissionError(f"secrets come from the environment here: set {self.variable(username)} and restart")
+
+    def delete_password(self, service: str, username: str) -> None:
+        raise PermissionError(f"secrets come from the environment here: unset {self.variable(username)} and restart")
+
+
+def default_backend() -> CredentialBackend:
+    """LUDIK_SECRETS=env picks the environment; anything else means the credential store of this desktop."""
+    if os.environ.get("LUDIK_SECRETS", "").lower() == "env":
+        return EnvironmentBackend()
+    import keyring
+
+    return keyring.get_keyring()
+
+
 class Keystore:
     def __init__(self, redactor: SecretRedactor, backend: CredentialBackend | None = None, service: str = SERVICE):
         if backend is None:
-            import keyring
-
-            backend = keyring.get_keyring()
+            backend = default_backend()
         self._backend = backend
         self._redactor = redactor
         self._service = service

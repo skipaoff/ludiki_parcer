@@ -228,6 +228,39 @@ class TradingSettings(_Section):
         return getattr(self, f"leverage_{exchange}", 1)
 
 
+class TelegramSettings(_Section):
+    """Where the terminal reports gaps when nobody is at the screen. The bot token lives in the credential store."""
+
+    enabled: bool = False
+    chat_id: str = ""
+    min_interest: int = Field(default=0, ge=0, le=100)
+    min_total_pct: Decimal | None = None
+    quiet_hours: str = ""
+    """Окно тишины вида "23:00-08:00" по времени машины; пусто — слать круглосуточно."""
+    digest_at: str = ""
+    """Время ежедневной сводки, "09:00"; пусто — не слать."""
+    alarms: bool = True
+    send_outcome: bool = True
+    max_messages_per_hour: int = Field(default=60, ge=0)
+
+    @field_validator("quiet_hours")
+    @classmethod
+    def _quiet_window(cls, value: str) -> str:
+        from app.alerts.notifier import parse_quiet_hours
+
+        parse_quiet_hours(value)
+        return value
+
+    @field_validator("digest_at")
+    @classmethod
+    def _digest_time(cls, value: str) -> str:
+        if value.strip():
+            hour, minute = (int(part) for part in value.split(":", 1))
+            if not (0 <= hour < 24 and 0 <= minute < 60):
+                raise ValueError("digest_at must be a time of day like 09:00")
+        return value
+
+
 class LoggingSettings(_Section):
     level: str = "INFO"
 
@@ -243,6 +276,7 @@ class Settings(_Section):
     feed: FeedSettings = FeedSettings()
     portfolio: PortfolioSettings = PortfolioSettings()
     trading: TradingSettings = TradingSettings()
+    telegram: TelegramSettings = TelegramSettings()
     logging: LoggingSettings = LoggingSettings()
 
 

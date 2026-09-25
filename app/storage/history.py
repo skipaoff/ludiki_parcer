@@ -103,3 +103,47 @@ async def storage_usage(pool: asyncpg.Pool) -> dict[str, Any]:
         "SELECT count(*) FROM opportunity_episodes WHERE entered_feed_at >= now() - interval '24 hours'"
     )
     return {"database_bytes": database_bytes, "hypertables": tables, "episodes_24h": episodes_day}
+
+
+async def daily_digest(pool: asyncpg.Pool, hours: int = 24) -> dict[str, Any]:
+    """Numbers for the message that sums up a day: how many gaps, the best one, how long they lived, by venue pair."""
+    row = await pool.fetchrow(
+        """
+        SELECT
+            count(*)                                                        AS gaps,
+            count(*) FILTER (WHERE end_reason = 'converged')                AS converged,
+            percentile_cont(0.5) WITHIN GROUP (ORDER BY extract(epoch FROM (coalesce(left_feed_at, ended_at, now()) - entered_feed_at)))
+                                                                            AS median_in_feed_s
+        FROM opportunity_episodes
+        WHERE entered_feed_at >= now() - make_interval(hours => $1)
+        """,
+        hours,
+    )
+    best = await pool.fetchrow(
+        """
+        SELECT token,
+               coalesce(total_peak_pct, roi_peak) AS peak_pct,
+               extract(epoch FROM (coalesce(left_feed_at, ended_at, now()) - entered_feed_at)) AS in_feed_s
+        FROM opportunity_episodes
+        WHERE entered_feed_at >= now() - make_interval(hours => $1)
+        ORDER BY coalesce(total_peak_pct, roi_peak) DESC NULLS LAST
+        LIMIT 1
+        """,
+        hours,
+    )
+    pairs = await pool.fetch(
+        """
+        SELECT upper(long_exchange) || ' ↔ ' || upper(short_exchange) AS pair, count(*) AS gaps
+        FROM opportunity_episodes
+        WHERE entered_feed_at >= now() - make_interval(hours => $1)
+        GROUP BY 1 ORDER BY 2 DESC LIMIT 4
+        """,
+        hours,
+    )
+    size = await pool.fetchval("SELECT pg_size_pretty(pg_database_size(current_database()))")
+    return {
+        **_plain(row),
+        "best": _plain(best) if best else None,
+        "by_pair": [_plain(pair) for pair in pairs],
+        "database_size": size,
+    }

@@ -62,3 +62,54 @@ def test_announced_keys_do_not_pile_up_forever():
     _, announced = decide([row()], old, now_ms=1_000 + RULES.cooldown_ms * 2, rules=RULES)
 
     assert "gone:pair" not in announced
+
+
+def live(key="binance:SOLUSDT|mexc:SOL_USDT", announced_ms=1_000, peak=None, missing=None):
+    from app.core.alerts import LiveAlert
+
+    return {key: LiveAlert(key, announced_ms, peak, missing)}
+
+
+def test_an_announced_gap_keeps_its_best_result_while_it_is_on_screen():
+    from app.core.alerts import track
+
+    updated, finished = track(live(), [row(**{"key": "binance:SOLUSDT|mexc:SOL_USDT"}) | {"total_pct": "1.9000"}], 2_000)
+
+    assert finished == []
+    assert updated["binance:SOLUSDT|mexc:SOL_USDT"].peak_total_pct == "1.9000"
+
+    updated, _ = track(updated, [row() | {"total_pct": "1.2000"}], 3_000)
+    assert updated["binance:SOLUSDT|mexc:SOL_USDT"].peak_total_pct == "1.9000"  # пик, а не последнее значение
+
+
+def test_a_gap_blinking_out_for_a_tick_is_not_over():
+    from app.core.alerts import track
+
+    updated, finished = track(live(), [], 2_000, gone_after_ms=60_000)
+
+    assert finished == [] and updated["binance:SOLUSDT|mexc:SOL_USDT"].missing_since_ms == 2_000
+
+    back, finished = track(updated, [row()], 3_000)
+    assert finished == [] and back["binance:SOLUSDT|mexc:SOL_USDT"].missing_since_ms is None
+
+
+def test_a_gap_gone_for_good_is_reported_once_with_its_lifetime():
+    from app.core.alerts import track
+
+    updated, _ = track(live(announced_ms=1_000, peak="2.1000"), [], 10_000, gone_after_ms=60_000)
+    updated, finished = track(updated, [], 70_000, gone_after_ms=60_000)
+
+    assert updated == {}
+    assert finished[0].lifetime_ms == 9_000 and finished[0].peak_total_pct == "2.1000"
+
+
+def test_the_phone_gate_is_stricter_than_the_feed():
+    from decimal import Decimal
+
+    from app.core.alerts import passes
+
+    weak = decide([row()], {}, now_ms=1_000, rules=RULES)[0][0]
+
+    assert passes(weak)
+    assert passes(weak, min_interest=64) and not passes(weak, min_interest=65)
+    assert passes(weak, min_total_pct=Decimal("1.4")) and not passes(weak, min_total_pct=Decimal("1.5"))

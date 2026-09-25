@@ -14,7 +14,7 @@ import logging
 import time
 from typing import Any, Callable
 
-from app.core.alerts import AlertRules, decide
+from app.core.alerts import AlertRules, GapAlert, LiveAlert, decide, track
 from app.journal.journal import Journal, Level
 
 log = logging.getLogger(__name__)
@@ -32,9 +32,14 @@ class GapAlerts:
         rules: AlertRules | None = None,
         clock_ms: Callable[[], float] = lambda: time.time() * 1000,
         sleep: Callable[[float], Any] = asyncio.sleep,
+        on_alerts: Callable[[list[GapAlert]], None] | None = None,
+        on_finished: Callable[[list[Any]], None] | None = None,
     ) -> None:
         self._rows = rows
         self._journal = journal
+        self._on_alerts = on_alerts
+        self._on_finished = on_finished
+        self._live: dict[str, LiveAlert] = {}
         self._rules = rules or AlertRules()
         self._clock_ms = clock_ms
         self._sleep = sleep
@@ -54,12 +59,16 @@ class GapAlerts:
     def _catch_up(self) -> None:
         """Remember what is already on screen without announcing it."""
         now = int(self._clock_ms())
-        _, self._announced = decide(self._rows(), self._announced, now, self._rules)
+        _, self._announced = decide(list(self._rows()), self._announced, now, self._rules)
 
     def check(self) -> list[str]:
         now = int(self._clock_ms())
-        alerts, self._announced = decide(self._rows(), self._announced, now, self._rules)
+        rows = list(self._rows())
+        alerts, self._announced = decide(rows, self._announced, now, self._rules)
+        # Gaps already announced are followed until they leave the feed, so their outcome can be told.
+        self._live, finished = track(self._live, rows, now)
         for alert in alerts:
+            self._live[alert.key] = LiveAlert(alert.key, now, alert.total_pct)
             self.sent += 1
             self._journal.emit(
                 Level.INFO,
@@ -75,4 +84,8 @@ class GapAlerts:
                 size_usd=alert.size_usd,
                 blocks=list(alert.blocks),
             )
+        if alerts and self._on_alerts is not None:
+            self._on_alerts(alerts)
+        if finished and self._on_finished is not None:
+            self._on_finished(finished)
         return [alert.key for alert in alerts]

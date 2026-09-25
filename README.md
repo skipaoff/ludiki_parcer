@@ -18,8 +18,9 @@
 
 1. [`docs/PLAN.md`](docs/PLAN.md) — полный план: решения, экраны, архитектура, формулы, база, дорожная карта до MVP и дальше. Отличия Windows — раздел 4.6.
 2. [`docs/KEYS.md`](docs/KEYS.md) — как получить ключ с правом торговли на каждой из девяти бирж и что нельзя включать.
-3. [`docs/EXCHANGES.md`](docs/EXCHANGES.md) — эндпоинты и особенности Binance, MEXC и следующих бирж, с пометками «проверено» или «проверить».
-4. [`reference/crypto_pars/README.md`](reference/crypto_pars/README.md) — наработки из парсера: что перенесено, что исправлено, почему старую логику нельзя торговать как есть.
+3. [`docs/SERVER.md`](docs/SERVER.md) — терминал на сервере: круглосуточный сбор истории и уведомления в Telegram.
+4. [`docs/EXCHANGES.md`](docs/EXCHANGES.md) — эндпоинты и особенности Binance, MEXC и следующих бирж, с пометками «проверено» или «проверить».
+5. [`reference/crypto_pars/README.md`](reference/crypto_pars/README.md) — наработки из парсера: что перенесено, что исправлено, почему старую логику нельзя торговать как есть.
 
 ## Установка на новую машину
 
@@ -159,6 +160,7 @@ scripts/
   windows/              ярлык на рабочем столе и иконка
   macos/setup.sh        разовая установка на Mac: кластер, база, пароль в связке ключей
   macos/create_desktop_shortcut.sh   ярлык на рабочем столе для Mac
+deploy/                 служба systemd и настройки для сервера
 .github/workflows/      CI: тесты на Ubuntu и Windows, сборка интерфейса, схема на PostgreSQL 18 + TimescaleDB
 ludik.cmd               запуск одной командой на Windows
 ludik.sh                то же на macOS и Linux

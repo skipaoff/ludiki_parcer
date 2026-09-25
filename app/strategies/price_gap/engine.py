@@ -637,6 +637,9 @@ class PriceGapEngine:
             "long": None if long is None else {"exchange": long.exchange, "symbol": long.symbol_raw, "url": trade_url(long)},
             "short": None if short is None else {"exchange": short.exchange, "symbol": short.symbol_raw, "url": trade_url(short)},
             "qty_tokens": _text(quote.qty_tokens, 12) if quote else None,
+            # Average execution prices by book: what the pair is actually entered at, for the row and for alerts.
+            "long_price": _text(quote.long_avg, 6) if quote else None,
+            "short_price": _text(quote.short_avg, 6) if quote else None,
             "size_usd": _text(size, 2),
             "capped_by": quote.capped_by if quote else None,
             # Profit in % of the size: book-based entry spread minus round-trip taker fees, if prices converge.

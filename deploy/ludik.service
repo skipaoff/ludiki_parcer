@@ -1,0 +1,43 @@
+# VFP: Keeps the terminal running on a server across crashes and reboots, with its secrets out of the repository.
+# Changes when: the way the terminal is started or fed its secrets changes.
+# Anti-goal:
+# 1. Secrets in this file — they live in /etc/ludik/ludik.env, readable only by the terminal's user.
+# 2. Opening the interface to the network: the terminal binds loopback, reach it over an SSH tunnel.
+#
+# Установка: docs/SERVER.md
+
+[Unit]
+Description=Terminal Ludik — cross-exchange price gaps
+Documentation=https://github.com/skipaoff/ludiki_parcer
+After=network-online.target postgresql.service
+Wants=network-online.target
+
+[Service]
+Type=exec
+User=ludik
+Group=ludik
+WorkingDirectory=/opt/ludik/ludiki_parcer
+Environment=LUDIK_SECRETS=env
+EnvironmentFile=/etc/ludik/ludik.env
+ExecStart=/opt/ludik/ludiki_parcer/.venv/bin/python -m app --no-browser
+Restart=always
+RestartSec=5
+# A terminal that cannot reach an exchange restarts; one that cannot parse its config must not loop forever.
+StartLimitIntervalSec=300
+StartLimitBurst=10
+TimeoutStopSec=30
+KillSignal=SIGINT
+
+# The service needs its own data directory and nothing else on the disk.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/ludik/ludik-data
+ProtectKernelTunables=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+
+[Install]
+WantedBy=multi-user.target

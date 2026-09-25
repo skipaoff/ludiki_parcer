@@ -1,0 +1,33 @@
+# Настройки терминала на сервере. Отличия от домашней машины помечены комментариями.
+# Секреты сюда не пишутся: на сервере они приходят из окружения (/etc/ludik/ludik.env).
+
+[server]
+host = "127.0.0.1"
+port = 8765
+open_browser = false        # на сервере некому открывать браузер
+
+[paths]
+data_dir = "/opt/ludik/ludik-data"
+spool_dir = "/opt/ludik/ludik-data/spool"
+logs_dir = "/opt/ludik/ludik-data/logs"
+web_dist = "web/dist"
+
+[database]
+host = "127.0.0.1"
+port = 5432
+name = "ludik"
+user = "ludik"
+autostart = false           # кластером управляет systemd, а не терминал
+
+[trading]
+enabled = false             # сервер в режиме наблюдателя: ключей бирж на нём нет
+
+[telegram]
+enabled = true
+chat_id = ""                # id чата или канала; токен бота — в /etc/ludik/ludik.env
+min_interest = 0
+quiet_hours = ""
+digest_at = "09:00"
+alarms = true
+send_outcome = true
+max_messages_per_hour = 60
