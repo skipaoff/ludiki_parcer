@@ -103,13 +103,31 @@ def test_a_gap_gone_for_good_is_reported_once_with_its_lifetime():
     assert finished[0].lifetime_ms == 9_000 and finished[0].peak_total_pct == "2.1000"
 
 
-def test_the_phone_gate_is_stricter_than_the_feed():
+def test_the_phone_gate_applies_the_same_filters_as_the_screen():
+    """Каждая мера отдельной проверкой: сообщение — это внимание человека, а не строка в таблице."""
     from decimal import Decimal
 
-    from app.core.alerts import passes
+    from app.core.alerts import PhoneGate, passes
 
-    weak = decide([row()], {}, now_ms=1_000, rules=RULES)[0][0]
+    gap = decide([row() | {"volume24h_weak_usd": "2100000", "capacity_usd": "3400"}], {}, now_ms=1_000, rules=RULES)[0][0]
 
-    assert passes(weak)
-    assert passes(weak, min_interest=64) and not passes(weak, min_interest=65)
-    assert passes(weak, min_total_pct=Decimal("1.4")) and not passes(weak, min_total_pct=Decimal("1.5"))
+    assert passes(gap)
+    assert passes(gap, PhoneGate(min_interest=64)) and not passes(gap, PhoneGate(min_interest=65))
+    assert passes(gap, PhoneGate(min_total_pct=Decimal("1.4"))) and not passes(gap, PhoneGate(min_total_pct=Decimal("1.5")))
+    assert passes(gap, PhoneGate(max_total_pct=Decimal("1.4"))) and not passes(gap, PhoneGate(max_total_pct=Decimal("1.3")))
+    assert passes(gap, PhoneGate(min_volume24h_usd=Decimal("2000000")))
+    assert not passes(gap, PhoneGate(min_volume24h_usd=Decimal("3000000")))
+    assert passes(gap, PhoneGate(min_capacity_usd=Decimal("3400")))
+    assert not passes(gap, PhoneGate(min_capacity_usd=Decimal("3401")))
+
+
+def test_a_gap_without_the_numbers_a_filter_needs_does_not_slip_through_it():
+    from decimal import Decimal
+
+    from app.core.alerts import PhoneGate, passes
+
+    gap = decide([row()], {}, now_ms=1_000, rules=RULES)[0][0]
+
+    assert gap.volume24h_weak_usd is None and gap.capacity_usd is None
+    assert not passes(gap, PhoneGate(min_volume24h_usd=Decimal("1")))
+    assert not passes(gap, PhoneGate(min_capacity_usd=Decimal("1")))

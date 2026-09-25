@@ -54,8 +54,9 @@ def test_a_gap_message_carries_the_numbers_the_decision_needs():
     assert "<b>LAPTOP</b> · итог <b>+1.67%</b> · интерес 73" in message.text
     assert "🟢 лонг GATE <code>0.021940</code>" in message.text
     assert "🔴 шорт BINGX <code>0.022310</code>" in message.text
-    assert "💰 профит $1.59 на $100 · ёмкость $3.4K" in message.text
-    assert "⏳ фандинг +0.08% за 8 ч · ближайший через 2 мин 14 с" in message.text
+    assert "💰 профит +1.59% · ёмкость $3.4K" in message.text
+    assert "⏳ фандинг +0.08% за 8 ч" in message.text
+    assert "ближайший через" not in message.text  # таймер расчёта в сообщении не нужен
     assert "📊 объём слабой ноги $2.1M · живёт 3 мин 12 с" in message.text
     assert message.buttons == (("GATE ↗", "https://gate.example/LAPTOP"), ("BINGX ↗", "https://bingx.example/LAPTOP"))
     assert "🔒" not in message.text
@@ -81,11 +82,10 @@ def test_the_best_gap_of_the_day_is_marked():
     assert "<i>лучшее за сутки</i>" in message.text
 
 
-def test_a_gap_that_cannot_be_clicked_says_why_instead_of_staying_silent():
+def test_a_terminal_in_watch_mode_does_not_repeat_that_trading_is_off_under_every_gap():
     message = gap(alert(blocks=("trading_disabled", "keys_not_accepted", "balance_unknown:long")), NOW)
 
-    assert "🔒 торговля выключена — это сигнал, не сделка" in message.text
-    assert "ключи" not in message.text  # одна причина, самая главная, а не список из четырёх
+    assert "🔒" not in message.text and "торговля" not in message.text
 
 
 def test_unknown_funding_is_said_out_loud_not_counted_as_zero():

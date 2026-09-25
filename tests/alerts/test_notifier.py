@@ -27,6 +27,14 @@ class FakeSender:
         return {"sent": len(self.posts)}
 
 
+def replace_fields(alert: GapAlert, **changes) -> GapAlert:
+    from dataclasses import replace
+
+    if "total" in changes:
+        changes["total_pct"] = changes.pop("total")
+    return replace(alert, **changes)
+
+
 def alert(key="pair", token="SOL", total="1.6700", interest=73) -> GapAlert:
     return GapAlert(
         key=key,
@@ -38,6 +46,9 @@ def alert(key="pair", token="SOL", total="1.6700", interest=73) -> GapAlert:
         profit_usd="1.59",
         interest=interest,
         size_usd="100.00",
+        capacity_usd="3400",
+        volume24h_weak_usd="2100000",
+        lifetime_ms=192_000,
     )
 
 
@@ -72,6 +83,22 @@ def test_a_gap_above_the_thresholds_is_sent_with_its_buttons():
 def test_a_gap_below_the_phone_threshold_stays_on_the_screen_only():
     made, sender = notifier(min_interest=80, min_total_pct=Decimal("1.0"))
     made.on_alerts([alert(interest=73)])
+
+    assert sender.posts == [] and made.skipped_threshold == 1
+
+
+def test_a_gap_the_screen_would_hide_never_reaches_the_chat():
+    made, sender = notifier()
+    quiet = alert(key="quiet")
+    quiet = replace_fields(quiet, volume24h_weak_usd="1000", capacity_usd="1000")
+    made.on_alerts([quiet])
+
+    assert sender.posts == [] and made.skipped_threshold == 1
+
+
+def test_a_gap_far_above_anything_real_is_a_broken_price_not_news():
+    made, sender = notifier()
+    made.on_alerts([replace_fields(alert(key="broken"), total="40.0000")])
 
     assert sender.posts == [] and made.skipped_threshold == 1
 

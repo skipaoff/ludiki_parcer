@@ -16,7 +16,7 @@ from datetime import datetime
 from decimal import Decimal
 from typing import Any, Callable
 
-from app.core.alerts import FinishedAlert, GapAlert, passes
+from app.core.alerts import FinishedAlert, GapAlert, PhoneGate, passes
 from app.core.telegram_message import DigestNumbers, alarm, closed_note, digest, gap
 from app.journal.journal import JournalEvent, Level
 
@@ -61,10 +61,12 @@ class TelegramNotifier:
         settings: Any,
         horizon_h: Callable[[], str],
         now: Callable[[], datetime] = datetime.now,
+        size_usd: Callable[[], Decimal] | None = None,
     ) -> None:
         self._sender = sender
         self._settings = settings
         self._horizon_h = horizon_h
+        self._size_usd = size_usd
         self._now = now
         self._quiet = parse_quiet_hours(settings.quiet_hours)
         self._sent_at: deque[float] = deque()
@@ -78,8 +80,9 @@ class TelegramNotifier:
     # ── gaps ────────────────────────────────────────────────────────────────
 
     def on_alerts(self, alerts: list[GapAlert]) -> None:
+        gate = self._gate()
         for alert in alerts:
-            if not passes(alert, self._settings.min_interest, self._min_total()):
+            if not passes(alert, gate):
                 self.skipped_threshold += 1
                 continue
             moment = self._now()
@@ -121,9 +124,19 @@ class TelegramNotifier:
 
     # ── internals ───────────────────────────────────────────────────────────
 
-    def _min_total(self) -> Decimal | None:
-        value = self._settings.min_total_pct
-        return None if value is None else Decimal(str(value))
+    def _gate(self) -> PhoneGate:
+        """The filters of the screen, in the terminal's own numbers: capacity defaults to the size being traded."""
+        settings = self._settings
+        capacity = settings.min_capacity_usd
+        if capacity is None and self._size_usd is not None:
+            capacity = self._size_usd()
+        return PhoneGate(
+            min_interest=settings.min_interest,
+            min_total_pct=None if settings.min_total_pct is None else Decimal(str(settings.min_total_pct)),
+            max_total_pct=None if settings.max_total_pct is None else Decimal(str(settings.max_total_pct)),
+            min_volume24h_usd=None if settings.min_volume24h_usd is None else Decimal(str(settings.min_volume24h_usd)),
+            min_capacity_usd=None if capacity is None else Decimal(str(capacity)),
+        )
 
     def _within_rate(self, moment: datetime) -> bool:
         limit = self._settings.max_messages_per_hour

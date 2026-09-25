@@ -235,7 +235,12 @@ async def _serve(
     notifier: TelegramNotifier | None = None
     if settings.telegram.enabled:
         telegram = TelegramSender(keystore.get(TELEGRAM_TOKEN), settings.telegram.chats)
-        notifier = TelegramNotifier(telegram, settings.telegram, lambda: str(engine.settings().funding_horizon_h))
+        notifier = TelegramNotifier(
+            telegram,
+            settings.telegram,
+            lambda: str(engine.settings().funding_horizon_h),
+            size_usd=lambda: engine.settings().size_usd,
+        )
         journal.add_sink(notifier.on_event)
         if telegram.dry_run:
             log.warning("telegram is enabled without a bot token: messages go to the log only")

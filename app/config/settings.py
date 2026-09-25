@@ -236,6 +236,12 @@ class TelegramSettings(_Section):
     """Кому слать: личные чаты и каналы. Каждый должен сам написать боту или сделать его администратором."""
     min_interest: int = Field(default=0, ge=0, le=100)
     min_total_pct: Decimal | None = None
+    max_total_pct: Decimal | None = Decimal("15")
+    """Выше этого — сломанная цена, а не вилка; те же 15% стоят фильтром в ленте."""
+    min_volume24h_usd: Decimal | None = Decimal("20000")
+    """Оборот слабой ноги за сутки — тот же порог, что в фильтрах экрана."""
+    min_capacity_usd: Decimal | None = None
+    """Пусто — влезает хотя бы размер сделки целиком; число задаёт свой порог."""
     quiet_hours: str = ""
     """Окно тишины вида "23:00-08:00" по времени машины; пусто — слать круглосуточно."""
     digest_at: str = ""

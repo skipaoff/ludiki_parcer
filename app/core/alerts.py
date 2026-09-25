@@ -187,12 +187,46 @@ def track(
     return updated, finished
 
 
-def passes(alert: GapAlert, min_interest: int = 0, min_total_pct: Decimal | None = None) -> bool:
-    """A second, stricter gate for a channel that reaches a phone: not every feed row is worth a buzz."""
-    if min_interest and (alert.interest is None or alert.interest < min_interest):
+@dataclass(frozen=True, slots=True)
+class PhoneGate:
+    """
+    The filters the screen applies before a person ever sees a row. A message is a person's attention, so the same
+    filters must hold here: without them the chat gets gaps the terminal itself would have hidden.
+    """
+
+    min_interest: int = 0
+    min_total_pct: Decimal | None = None
+    max_total_pct: Decimal | None = None
+    """A "gap" far above anything real is a broken price, not an opportunity."""
+    min_volume24h_usd: Decimal | None = None
+    min_capacity_usd: Decimal | None = None
+    """How much money the book takes at the threshold: below the size being traded the row is theatre."""
+
+
+def _decimal(value: Any) -> Decimal | None:
+    if value in (None, ""):
+        return None
+    try:
+        return Decimal(str(value))
+    except InvalidOperation:
+        return None
+
+
+def passes(alert: GapAlert, gate: PhoneGate = PhoneGate()) -> bool:
+    """True when a gap deserves to reach a phone, by the same measures the feed screen uses."""
+    if gate.min_interest and (alert.interest is None or alert.interest < gate.min_interest):
         return False
-    if min_total_pct is not None:
-        total = None if alert.total_pct in (None, "") else Decimal(str(alert.total_pct))
-        if total is None or total < min_total_pct:
+    total = _decimal(alert.total_pct)
+    if gate.min_total_pct is not None and (total is None or total < gate.min_total_pct):
+        return False
+    if gate.max_total_pct is not None and total is not None and total > gate.max_total_pct:
+        return False
+    if gate.min_volume24h_usd is not None:
+        volume = _decimal(alert.volume24h_weak_usd)
+        if volume is None or volume < gate.min_volume24h_usd:
+            return False
+    if gate.min_capacity_usd is not None:
+        capacity = _decimal(alert.capacity_usd)
+        if capacity is None or capacity < gate.min_capacity_usd:
             return False
     return True

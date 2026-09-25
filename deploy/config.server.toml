@@ -25,7 +25,11 @@ enabled = false             # сервер в режиме наблюдател�
 [telegram]
 enabled = true
 chats = []                  # id чатов и каналов; токен бота — в /etc/ludik/ludik.env
-min_interest = 0
+min_interest = 0                # слать только пары с интересом не ниже (0 — не фильтровать)
+# min_total_pct = 1.5           # и только с итогом не ниже, в процентах
+max_total_pct = 15              # выше — сломанная цена, а не вилка
+min_volume24h_usd = 20000       # оборот слабой ноги за сутки: тот же порог, что в фильтрах ленты
+# min_capacity_usd = 100        # сколько денег должно влезать в стакан; пусто — размер сделки целиком
 quiet_hours = ""
 digest_at = "09:00"
 alarms = true

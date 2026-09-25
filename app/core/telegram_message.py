@@ -4,7 +4,7 @@ Changes when: the wording or the set of numbers in a message changes.
 Anti-goal:
 1. Computing anything about a gap here — the numbers arrive ready; this file only chooses words.
 2. Sending: no network, no clock of its own, so every message can be asserted in a test.
-3. A message that hides why a gap cannot be taken — the reason is part of the text.
+3. Numbers nobody acts on: the size behind a percent, a settlement timer, a standing reason the click is off.
 """
 
 from __future__ import annotations
@@ -18,17 +18,6 @@ from app.core.alerts import GapAlert
 SOON_MS = 30 * 60 * 1000
 """A settlement this close is worth a warning line of its own."""
 BAD_SETTLEMENT_PCT = Decimal("-0.05")
-
-# In the order that answers "why can't I click this?" first. Only the first reason that applies is shown:
-# a terminal in watch mode would otherwise repeat four of them under every single gap.
-BLOCK_WORDS = (
-    ("trading_disabled", "торговля выключена — это сигнал, не сделка"),
-    ("keys_not_accepted", "ключи биржи не добавлены"),
-    ("max_open_pairs", "достигнут лимит открытых пар"),
-    ("max_total_usd", "достигнут лимит общего объёма"),
-    ("balance_unknown", "баланс биржи неизвестен"),
-    ("not_warmed_up", "плечо ещё не выставлено"),
-)
 
 
 @dataclass(frozen=True, slots=True)
@@ -105,15 +94,12 @@ def gap(alert: GapAlert, now_ms: int, horizon_h: str = "8", best_of_day: bool = 
     lines.append(f"🔴 шорт {_venue(alert.short.exchange)} <code>{price(alert.short.price)}</code>")
     lines.append("")
 
-    size = money(alert.size_usd)
+    # Profit as a percent of the position: the size the terminal happened to quote on is its own business.
     capacity = f" · ёмкость {money(alert.capacity_usd)}" if alert.capacity_usd else ""
-    lines.append(f"💰 профит {money(alert.profit_usd)} на {size}{capacity}")
+    lines.append(f"💰 профит {percent(alert.profit_pct)}{capacity}")
 
     if alert.funding_horizon_pct is not None:
-        settlement = ""
-        if alert.funding_next_ms:
-            settlement = f" · ближайший через {duration(alert.funding_next_ms - now_ms)}"
-        lines.append(f"⏳ фандинг {percent(alert.funding_horizon_pct)} за {horizon_h} ч{settlement}")
+        lines.append(f"⏳ фандинг {percent(alert.funding_horizon_pct)} за {horizon_h} ч")
     else:
         lines.append("⏳ фандинг неизвестен — итог посчитан без него")
 
@@ -125,12 +111,6 @@ def gap(alert: GapAlert, now_ms: int, horizon_h: str = "8", best_of_day: bool = 
 
     volume = f"объём слабой ноги {money(alert.volume24h_weak_usd)}"
     lines.append(f"📊 {volume} · живёт {duration(alert.lifetime_ms)}")
-
-    blocked = {block.split(":", 1)[0] for block in alert.blocks}
-    for code, words in BLOCK_WORDS:
-        if code in blocked:
-            lines.append(f"🔒 {words}")
-            break
 
     buttons = tuple(
         (f"{_venue(leg.exchange)} ↗", leg.url) for leg in (alert.long, alert.short) if leg.url
