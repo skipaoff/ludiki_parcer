@@ -392,3 +392,20 @@ def test_radar_coins_from_tradable_pairs_come_before_suspicious_spreads():
     engine.apply_settings(FeedSettings(radar_rows=3, min_roi_pct=Decimal("5")))
     engine.tick()
     assert [row["token"] for row in engine.view()["radar"]] == ["BBB", "CCC", "AAA"]
+
+
+def test_a_row_carries_what_each_leg_costs():
+    """The screen shows the price beside the venue: what the size pays on the long leg and gets on the short."""
+    engine, state, clock, *_ = build(sol_record())
+    engine.tick()
+    push_market(state)
+    engine.tick()
+    clock.now += 400
+    push_market(state)
+    engine.tick()
+
+    row = engine.view()["rows"][0]
+
+    # MEXC is the cheap side: bought at its ask, sold into Binance's bid.
+    assert (row["long"]["exchange"], row["long"]["price"]) == ("mexc", "100")
+    assert (row["short"]["exchange"], row["short"]["price"]) == ("binance", "101.2")

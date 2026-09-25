@@ -317,25 +317,40 @@ function OpenButton({
   );
 }
 
-function Leg({ leg }: { leg: FeedRow["long"] }) {
+/** Both legs of a row are read against each other, so they show the same number of decimals: 0.000726, 0.000730. */
+function priceDecimals(row: FeedRow): number {
+  const digits = (value: string | null | undefined) => (value && value.includes(".") ? value.split(".")[1].length : 0);
+  return Math.max(digits(row.long?.price), digits(row.short?.price));
+}
+
+function Leg({ leg, side, decimals }: { leg: FeedRow["long"]; side: "long" | "short"; decimals: number }) {
   if (!leg) return <>—</>;
   const name = leg.exchange.toUpperCase();
   const watchOnly = READ_ONLY.has(leg.exchange);
+  const price = leg.price === null ? null : Number(leg.price).toFixed(decimals);
   return (
-    <>
-      {leg.url ? (
-        <a className="chip" href={leg.url} target="_blank" rel="noreferrer" title={`открыть ${name} в браузере`}>
-          {name}
-        </a>
-      ) : (
-        <span className="chip">{name}</span>
-      )}
-      {watchOnly && (
-        <span className="chip chip-note muted" title="торгового API у биржи нет: такую вилку можно только смотреть">
-          набл.
+    <span className="leg">
+      <span className="leg-venue">
+        {leg.url ? (
+          <a className="chip" href={leg.url} target="_blank" rel="noreferrer" title={`открыть ${name} в браузере`}>
+            {name}
+          </a>
+        ) : (
+          <span className="chip">{name}</span>
+        )}
+        {watchOnly && (
+          <span className="chip chip-note muted" title="торгового API у биржи нет: такую вилку можно только смотреть">
+            набл.
+          </span>
+        )}
+      </span>
+      {price && (
+        // The price the size is measured at, not the last trade: what you pay on the long leg, what you get on the short.
+        <span className="leg-price" title={side === "long" ? "средняя цена покупки на этот размер" : "средняя цена продажи на этот размер"}>
+          {price}
         </span>
       )}
-    </>
+    </span>
   );
 }
 
@@ -417,10 +432,10 @@ function GapLine({
         )}
       </td>
       <td className="left">
-        <Leg leg={row.long} />
+        <Leg leg={row.long} side="long" decimals={priceDecimals(row)} />
       </td>
       <td className="left">
-        <Leg leg={row.short} />
+        <Leg leg={row.short} side="short" decimals={priceDecimals(row)} />
       </td>
       <td
         className="strong"

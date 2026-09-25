@@ -223,6 +223,27 @@ a.chip:hover {
   font-size: 0.85em;
 }
 
+/* A leg is read as one thing — the venue and what it charges — so it never breaks across lines. */
+.leg {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 1.2em;
+  white-space: nowrap;
+}
+
+/* The venue and its "watch only" mark are one thing; the price is the other, and only those two spread apart. */
+.leg-venue {
+  display: inline-flex;
+  align-items: baseline;
+}
+
+/* The price stands behind the venue: quieter and a shade smaller, so the eye takes the name first. */
+.leg-price {
+  color: var(--muted);
+  font-size: 0.92em;
+}
+
 .indicators {
   display: flex;
   gap: 1.5rem;

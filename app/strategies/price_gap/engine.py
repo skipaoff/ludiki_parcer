@@ -592,6 +592,15 @@ class PriceGapEngine:
         if long is None and top is not None:
             long, short = (assessment.a, assessment.b) if top.long_exchange == assessment.a.exchange else (assessment.b, assessment.a)
         funding, funding_view = (None, None) if long is None or short is None else self._pair_funding(long, short, now)
+        # What each leg costs: the average the size would actually get through the book, and for a radar row
+        # without books the best price on the screen's side of it — buy on the long leg, sell on the short one.
+        long_price, short_price = (quote.long_avg, quote.short_avg) if quote and quote.long_avg else (None, None)
+        if long_price is None and long is not None and short is not None:
+            long_top = self._state.tops.get((long.exchange, long.symbol_raw))
+            short_top = self._state.tops.get((short.exchange, short.symbol_raw))
+            if long_top is not None and short_top is not None:
+                long_price = Decimal(str(long_top.ask)) / long.price_unit_tokens
+                short_price = Decimal(str(short_top.bid)) / short.price_unit_tokens
         memo_signature = None
         if episode is None:
             # Everything such a row shows; a radar pair without books keeps its row until its best prices are re-ranked.
@@ -605,6 +614,8 @@ class PriceGapEngine:
                 short,
                 None if quote is None else (quote.qty_tokens, quote.size_usd, quote.roi_net_pct, quote.capacity_usd, quote.problem),
                 self._standing_seconds(record.pair_id),
+                long_price,
+                short_price,
             )
             memo = self._row_memo.get(record.key)
             if memo is not None and memo[0] == memo_signature:
@@ -641,8 +652,8 @@ class PriceGapEngine:
         row = {
             "key": record.key,
             "token": assessment.token,
-            "long": None if long is None else {"exchange": long.exchange, "symbol": long.symbol_raw, "url": trade_url(long)},
-            "short": None if short is None else {"exchange": short.exchange, "symbol": short.symbol_raw, "url": trade_url(short)},
+            "long": None if long is None else {"exchange": long.exchange, "symbol": long.symbol_raw, "url": trade_url(long), "price": _text(long_price, 6)},
+            "short": None if short is None else {"exchange": short.exchange, "symbol": short.symbol_raw, "url": trade_url(short), "price": _text(short_price, 6)},
             "qty_tokens": _text(quote.qty_tokens, 12) if quote else None,
             "size_usd": _text(size, 2),
             "capped_by": quote.capped_by if quote else None,

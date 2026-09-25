@@ -112,6 +112,8 @@ export interface FeedLeg {
   exchange: string;
   symbol: string;
   url: string | null;
+  /** What this leg costs: the average the size gets through the book, or the best price when there is no book. */
+  price: string | null;
 }
 
 export interface FeedRow {
