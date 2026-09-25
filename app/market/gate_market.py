@@ -50,7 +50,6 @@ def handle_frame(state: MarketState, raw: str | bytes) -> None:
     channel, event = message.get("channel"), message.get("event")
     if channel == "futures.order_book" and event == "all":
         result = message.get("result") or {}
-        state.count(EXCHANGE)
         state.set_book(
             EXCHANGE,
             result["contract"],
@@ -156,7 +155,6 @@ class GateMarket:
                         if bid > 0 and ask > 0:
                             self._state.set_top(EXCHANGE, contract, bid, ask, now, received_ms=now)
                         self._state.set_mark(EXCHANGE, contract, mark, index, volume)
-                    self._state.count(EXCHANGE)
                     self.polls += 1
                 except asyncio.CancelledError:
                     raise

@@ -67,7 +67,6 @@ def handle_frame(state: MarketState, raw: str | bytes, exchange: str = EXCHANGE)
             if item.get("e") == "markPriceUpdate":
                 state.set_mark(exchange, item["s"], float(item["p"]), float(item["i"]) if item.get("i") else None)
         return
-    state.count(exchange)
     kind = data.get("e")
     if kind == "bookTicker":
         state.set_top(exchange, data["s"], float(data["b"]), float(data["a"]), int(data.get("T") or data.get("E") or 0))
@@ -131,12 +130,6 @@ class BinanceStreams:
     def resubscribe_depth(self, symbol: str) -> None:
         self._depth.resubscribe(depth_stream(symbol))
 
-    def stream_age_ms(self, symbol: str) -> float | None:
-        """Time since the depth connection delivered any frame; a quiet book on a live connection is not stale."""
-        if not self._depth.connected or self._depth.last_message_ms is None:
-            return None
-        return time.time() * 1000 - self._depth.last_message_ms
-
     async def run(self) -> None:
         self._start(self._depth)
         self._start(self._marks)
@@ -168,7 +161,6 @@ class BinanceStreams:
                             current = self._state.tops.get(key)
                             if current is None or current.exchange_ts_ms <= ts:
                                 self._state.set_top(self._exchange, item["symbol"], float(item["bidPrice"]), float(item["askPrice"]), ts)
-                    self._state.count(self._exchange)
                     self.polls += 1
                 except asyncio.CancelledError:
                     raise

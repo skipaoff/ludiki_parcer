@@ -43,7 +43,6 @@ def handle_frame(buffer: BookBuffer, state: MarketState, raw: str | bytes) -> No
     topic = message.get("topic") or ""
     if message.get("subject") == "level2" and topic.startswith(TOPIC):
         data = message.get("data") or {}
-        state.count(EXCHANGE)
         buffer.put(topic.split(":", 1)[1], data.get("bids") or [], data.get("asks") or [], int(data.get("ts") or data.get("timestamp") or 0))
 
 
@@ -108,7 +107,6 @@ class KucoinMarket:
         for symbol, bid, ask in ticker_rows(await self._get(TICKERS_URL)):
             if bid > 0 and ask > 0:
                 self._state.set_top(EXCHANGE, symbol, bid, ask, now)
-        self._state.count(EXCHANGE)
 
     async def _poll_contracts(self) -> None:
         for symbol, mark, index, volume in contract_rows(await self._get(CONTRACTS_URL)):

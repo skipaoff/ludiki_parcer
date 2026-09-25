@@ -9,8 +9,8 @@ from app.core.roi import (
     exit_quote,
     liquidation_distance_pct,
     pnl_now_usd,
-    top_of_book_roi_net,
 )
+from app.core.radar import best_price_roi
 from app.core.vwap import walk
 from tests.core.helpers import D, book, fees, levels
 
@@ -47,7 +47,9 @@ def test_thin_book_kills_a_gap_that_looks_good_on_top_of_book():
     mexc = book("mexc", asks=levels(("1.000", "10"), ("1.030", "990")))
     binance = book("binance", bids=levels(("1.020", "1000")))
 
-    assert top_of_book_roi_net(mexc, binance, fees()) == D("1.80")
+    # The radar reads the top of these books as a 1.8 % gap; walking the book for the size gives a loss instead.
+    top = best_price_roi("mexc|binance", "mexc", 0.999, 1.000, "binance", 1.020, 1.021, 0.2)
+    assert round(top.roi_net_pct, 2) == 1.80
     assert entry_quote(mexc, binance, D("1000"), fees()).roi_net_pct < 0
 
 

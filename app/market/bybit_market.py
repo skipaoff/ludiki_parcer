@@ -78,7 +78,6 @@ def handle_frame(books: LocalBooks, buffer: BookBuffer, state: MarketState, raw:
     if topic.startswith("orderbook."):
         symbol = books.apply(message)
         if symbol is not None:
-            state.count(EXCHANGE)
             bids, asks = books.levels(symbol)
             buffer.put(symbol, bids, asks, int(message.get("cts") or message.get("ts") or 0))
 
@@ -125,7 +124,6 @@ class BybitMarket:
             if bid > 0 and ask > 0:
                 self._state.set_top(EXCHANGE, symbol, bid, ask, now)
             self._state.set_mark(EXCHANGE, symbol, mark, index, volume)
-        self._state.count(EXCHANGE)
 
     async def run(self) -> None:
         self._pool.start()

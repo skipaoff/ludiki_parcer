@@ -57,7 +57,6 @@ def handle_frame(state: MarketState, raw: str | bytes) -> str | None:
     topic = message.get("dataType") or ""
     data = message.get("data")
     if topic.endswith("@depth20@100ms") and isinstance(data, dict):
-        state.count(EXCHANGE)
         state.set_book(EXCHANGE, topic.split("@", 1)[0], data.get("bids") or [], data.get("asks") or [], int(message.get("ts") or 0))
     elif message.get("code") not in (None, 0):
         log.warning("bingx stream answer %s: %s %s", message.get("id"), message.get("code"), message.get("msg"))
@@ -163,7 +162,6 @@ class BingxMarket:
                     if bid > 0 and ask > 0:
                         self._state.set_top(EXCHANGE, symbol, bid, ask, now)
                     self._volumes[symbol] = volume
-                self._state.count(EXCHANGE)
                 self.polls += 1
             except asyncio.CancelledError:
                 raise

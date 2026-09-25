@@ -40,7 +40,6 @@ def handle_frame(state: MarketState, raw: str | bytes) -> None:
         return
     data = message.get("data") or {}
     levels = data.get("levels") or [[], []]
-    state.count(EXCHANGE)
     state.set_book(
         EXCHANGE,
         data["coin"],
@@ -87,7 +86,6 @@ class HyperliquidMarket:
             if bid > 0 and ask > 0:
                 self._state.set_top(EXCHANGE, coin, bid, ask, now)
             self._state.set_mark(EXCHANGE, coin, mark, index, volume)
-        self._state.count(EXCHANGE)
 
     async def run(self) -> None:
         self._pool.start()

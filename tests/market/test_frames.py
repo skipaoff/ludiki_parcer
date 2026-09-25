@@ -40,7 +40,6 @@ def test_binance_book_ticker_updates_per_token_top():
     top = state.tops[("binance", "1000PEPEUSDT")]
     assert abs(top.bid - 0.0000034082) < 1e-15
     assert top.exchange_ts_ms == 1789327919095
-    assert state.messages["binance"] == 1
 
 
 def test_binance_partial_depth_becomes_a_book():
@@ -54,7 +53,6 @@ def test_binance_partial_depth_becomes_a_book():
 def test_binance_control_answer_is_ignored():
     state = state_with()
     binance_streams.handle_frame(state, '{"result":null,"id":1}')
-    assert state.messages == {}
 
 
 def test_mexc_depth_full_levels_are_price_volume_orders():

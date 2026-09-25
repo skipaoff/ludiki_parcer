@@ -59,16 +59,12 @@ class MarketState:
         self.tops: dict[Key, Top] = {}
         self.books: dict[Key, Book] = {}
         self.marks: dict[Key, Mark] = {}
-        self.messages: dict[str, int] = {}
 
     def set_instruments(self, instruments: Sequence[Instrument]) -> None:
         self._instruments = {(item.exchange, item.symbol_raw): item for item in instruments}
 
     def instrument(self, key: Key) -> Instrument | None:
         return self._instruments.get(key)
-
-    def count(self, exchange: str, messages: int = 1) -> None:
-        self.messages[exchange] = self.messages.get(exchange, 0) + messages
 
     def set_top(
         self, exchange: str, symbol: str, bid: float, ask: float, exchange_ts_ms: int, received_ms: float | None = None

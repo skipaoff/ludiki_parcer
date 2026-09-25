@@ -77,13 +77,6 @@ def best_entry(book_a: Book, book_b: Book, qty_tokens: Decimal, fees_ab: Fees, f
     return max(quotes, key=lambda quote: quote.roi_net_pct, default=None)
 
 
-def top_of_book_roi_net(long_book: Book, short_book: Book, fees: Fees) -> Decimal | None:
-    """Upper bound of net ROI for any size. A pair below the threshold here can never pass by depth."""
-    if not long_book.asks or not short_book.bids:
-        return None
-    return gross_pct(long_book.asks[0].price, short_book.bids[0].price) - fees.round_trip_pct
-
-
 def capacity_tokens(
     long_asks: Sequence[Level],
     short_bids: Sequence[Level],

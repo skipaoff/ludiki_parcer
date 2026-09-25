@@ -44,7 +44,6 @@ def handle_frame(state: MarketState, raw: str | bytes) -> None:
     channel = message.get("channel")
     if channel == "push.depth.full":
         data = message["data"]
-        state.count(EXCHANGE)
         state.set_book(EXCHANGE, message["symbol"], data["bids"], data["asks"], int(data.get("cts") or message.get("ts") or 0))
     elif channel == "rs.error" or (isinstance(channel, str) and channel.startswith("rs.") and message.get("data") != "success"):
         log.warning("mexc stream answer %s: %s", channel, message.get("data"))
@@ -116,13 +115,6 @@ class MexcMarket:
         if socket is not None:
             socket.resubscribe(symbol)
 
-    def stream_age_ms(self, symbol: str) -> float | None:
-        """Time since the connection carrying this symbol's book delivered any frame (pongs included)."""
-        socket = self._placement.get(symbol)
-        if socket is None or not socket.connected or socket.last_message_ms is None:
-            return None
-        return time.time() * 1000 - socket.last_message_ms
-
     def _load(self, socket: ManagedSocket) -> int:
         return sum(1 for placed in self._placement.values() if placed is socket)
 
@@ -155,7 +147,6 @@ class MexcMarket:
                         if bid and ask:
                             self._state.set_top(EXCHANGE, symbol, bid, ask, ts)
                         self._state.set_mark(EXCHANGE, symbol, fair, index, amount)
-                    self._state.count(EXCHANGE)
                     self.polls += 1
                     self.last_poll_ms = time.time() * 1000
                 except asyncio.CancelledError:

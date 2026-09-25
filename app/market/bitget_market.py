@@ -41,7 +41,6 @@ def handle_frame(state: MarketState, raw: str | bytes) -> None:
     if arg.get("channel") != CHANNEL or not message.get("data"):
         return
     data = message["data"][0]
-    state.count(EXCHANGE)
     state.set_book(EXCHANGE, arg["instId"], data.get("bids") or [], data.get("asks") or [], int(data.get("ts") or message.get("ts") or 0))
 
 
@@ -85,7 +84,6 @@ class BitgetMarket:
             if bid > 0 and ask > 0:
                 self._state.set_top(EXCHANGE, symbol, bid, ask, now)
             self._state.set_mark(EXCHANGE, symbol, mark, index, volume)
-        self._state.count(EXCHANGE)
 
     async def run(self) -> None:
         self._pool.start()
