@@ -109,19 +109,7 @@ class Database:
             pool: asyncpg.Pool | None = None
             try:
                 await self._ensure_cluster()
-                pool = await asyncpg.create_pool(
-                    host=self._settings.host,
-                    port=self._settings.port,
-                    user=self._settings.user,
-                    password=self._password(),
-                    database=self._settings.name,
-                    min_size=1,
-                    max_size=4,
-                    timeout=self._settings.connect_timeout_s,
-                    init=_init_connection,
-                    # Server messages in English: localized ones arrive in the cluster's code page and become unreadable in logs.
-                    server_settings={"lc_messages": "C"},
-                )
+                pool = await self._open_pool()
                 async with pool.acquire() as connection:
                     applied = await migrate(connection, self._migrations_dir)
             except Exception as exc:
@@ -165,6 +153,33 @@ class Database:
                         continue
                     latest = {tuple(row[key] for key in keys): row for row in group}
                     await bulk_insert(connection, table, list(latest.values()), tail=upsert_tail(keys, columns))
+
+    async def _open_pool(self) -> asyncpg.Pool:
+        """
+        Server messages in English: localized ones arrive in the cluster's code page and become unreadable in logs.
+        Only a superuser may set lc_messages, and the terminal's database user is an ordinary one on a server —
+        there the pool opens without it rather than refusing to start (found on the server, 26.09.2026).
+        """
+        settings: dict[str, str] | None = {"lc_messages": "C"}
+        while True:
+            try:
+                return await asyncpg.create_pool(
+                    host=self._settings.host,
+                    port=self._settings.port,
+                    user=self._settings.user,
+                    password=self._password(),
+                    database=self._settings.name,
+                    min_size=1,
+                    max_size=4,
+                    timeout=self._settings.connect_timeout_s,
+                    init=_init_connection,
+                    server_settings=settings,
+                )
+            except asyncpg.InsufficientPrivilegeError:
+                if settings is None:
+                    raise
+                log.info("this database user may not set lc_messages; server messages stay in the cluster's language")
+                settings = None
 
     async def _ensure_cluster(self) -> None:
         if not self._settings.autostart or self._settings.host not in LOOPBACK_HOSTS:
