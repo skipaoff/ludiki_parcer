@@ -34,3 +34,19 @@ def test_short_values_are_not_registered_to_avoid_masking_ordinary_words():
     redactor = SecretRedactor()
     redactor.add("abc")
     assert redactor.redact("abc def") == "abc def"
+
+
+def test_a_coin_named_token_is_not_mistaken_for_a_secret():
+    """Монета в журнале лежит в поле token; маскировка по имени превращала каждое торговое событие в ***."""
+    redactor = SecretRedactor()
+
+    assert redactor.redact("{'token': 'FLYBRAIN', 'interest': 75}") == "{'token': 'FLYBRAIN', 'interest': 75}"
+    assert redactor.redact("bot_token=8883193233:AAE-secret") == "bot_token=***"
+    assert redactor.redact("session_token: abcdefghijkl") == "session_token: ***"
+
+
+def test_a_registered_secret_is_masked_whatever_the_field_is_called():
+    redactor = SecretRedactor()
+    redactor.add("8883193233:AAE-secret-value")
+
+    assert redactor.redact("{'token': '8883193233:AAE-secret-value'}") == "{'token': '***'}"

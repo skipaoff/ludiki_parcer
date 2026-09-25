@@ -17,9 +17,11 @@ from pathlib import Path
 
 MASK = "***"
 MIN_SECRET_LENGTH = 6
-# Header and query names that carry credentials or signatures in exchange requests.
+# Header and query names that carry credentials or signatures in exchange requests. "token" on its own is not
+# one of them: that is what the terminal calls a coin, and masking it turned every trading event into ***.
 SENSITIVE_FIELDS = re.compile(
-    r"(?i)\b(x-mbx-apikey|apikey|api_key|api-key|secret|signature|password|token|listenkey)"
+    r"(?i)\b(x-mbx-apikey|apikey|api[_-]?key|secret|signature|password|listenkey"
+    r"|[a-z]+[_-]token|token[_-][a-z]+)"
     r"([\"']?\s*[:=]\s*[\"']?)([^\s\"',&}]+)"
 )
 
