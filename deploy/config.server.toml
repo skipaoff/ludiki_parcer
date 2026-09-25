@@ -22,6 +22,9 @@ autostart = false           # кластером управляет systemd, а 
 [trading]
 enabled = false             # сервер в режиме наблюдателя: ключей бирж на нём нет
 
+[feed]
+notify_after_s = 30         # вилка попадает в уведомления, прожив столько секунд
+
 [telegram]
 enabled = true
 chats = []                  # id чатов и каналов; токен бота — в /etc/ludik/ludik.env

@@ -157,6 +157,8 @@ class FeedSettings(_Section):
     book_limit: int = Field(default=120, ge=2, le=400)
     tracking_limit: int = Field(default=20, ge=0, le=200)
     radar_rows: int = Field(default=40, ge=0, le=100)  # coins in the radar, each with up to RADAR_PAIRS_PER_TOKEN pairs
+    notify_after_s: int = Field(default=30, ge=0)
+    """Сколько вилка должна продержаться, чтобы о ней сообщили. Лента показывает раньше: там смотрит человек."""
     funding_horizon_h: Decimal = Field(default=Decimal("8"), ge=1, le=168)  # funding counted into the expected result
     fresh_ms: int = Field(default=1000, ge=100)
     quiet_book_max_ms: int = Field(default=10000, ge=1000)

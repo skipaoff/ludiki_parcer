@@ -26,6 +26,12 @@ ACCOUNT_BLOCKS = frozenset(
 class AlertRules:
     cooldown_ms: int = 600_000
     """The same pair is not announced again within this window, however often it leaves and re-enters the feed."""
+    min_lifetime_ms: int = 30_000
+    """
+    A gap must have held this long to be worth interrupting anyone. The feed lets a large gap in after five
+    seconds, which is right for someone watching the screen and wrong for a phone: at that age a "gap" is often
+    one exchange lagging behind another for a second or two.
+    """
     ignorable_blocks: frozenset[str] = ACCOUNT_BLOCKS
 
 
@@ -96,6 +102,10 @@ def decide(
         blocks = tuple(str(block) for block in (row.get("open_blocks") or []))
         market_blocks = [block for block in blocks if block.split(":", 1)[0] not in rules.ignorable_blocks]
         if market_blocks or row.get("block"):
+            continue
+        lifetime_ms = row.get("lifetime_ms")
+        if lifetime_ms is None or lifetime_ms < rules.min_lifetime_ms:
+            # Too young to announce — and not remembered as announced, so it still counts once it holds.
             continue
         key = str(row.get("key"))
         last = fresh.get(key)

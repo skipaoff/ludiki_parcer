@@ -5,10 +5,11 @@ from app.core.alerts import AlertRules, decide
 RULES = AlertRules(cooldown_ms=600_000)
 
 
-def row(key="binance:SOLUSDT|mexc:SOL_USDT", blocks=(), block=None, token="SOL"):
+def row(key="binance:SOLUSDT|mexc:SOL_USDT", blocks=(), block=None, token="SOL", lifetime_ms=120_000):
     return {
         "key": key,
         "token": token,
+        "lifetime_ms": lifetime_ms,
         "long": {"exchange": "mexc", "symbol": "SOL_USDT"},
         "short": {"exchange": "binance", "symbol": "SOLUSDT"},
         "total_pct": "1.4000",
@@ -131,3 +132,27 @@ def test_a_gap_without_the_numbers_a_filter_needs_does_not_slip_through_it():
     assert gap.volume24h_weak_usd is None and gap.capacity_usd is None
     assert not passes(gap, PhoneGate(min_volume24h_usd=Decimal("1")))
     assert not passes(gap, PhoneGate(min_capacity_usd=Decimal("1")))
+
+
+def test_a_gap_that_has_not_held_long_enough_is_not_announced():
+    """Лента пускает крупную вилку через 5 секунд — человеку у экрана это годится, телефону нет."""
+    young = row(lifetime_ms=6_000)
+
+    assert decide([young], {}, now_ms=1_000, rules=RULES)[0] == []
+
+
+def test_a_young_gap_is_not_counted_as_announced_and_still_gets_its_message_later():
+    young = row(lifetime_ms=6_000)
+    _, announced = decide([young], {}, now_ms=1_000, rules=RULES)
+
+    assert announced == {}  # не «уже сообщили», а «ещё рано»
+
+    grown, _ = decide([row(lifetime_ms=31_000)], announced, now_ms=26_000, rules=RULES)
+    assert [alert.token for alert in grown] == ["SOL"]
+
+
+def test_a_gap_without_a_lifetime_is_not_announced_either():
+    nameless = row()
+    nameless.pop("lifetime_ms")
+
+    assert decide([nameless], {}, now_ms=1_000, rules=RULES)[0] == []

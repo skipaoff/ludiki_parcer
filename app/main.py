@@ -28,6 +28,7 @@ import orjson
 import uvicorn
 
 from app.alerts.notifier import TelegramNotifier
+from app.core.alerts import AlertRules
 from app.alerts.service import GapAlerts
 from app.alerts.telegram import TelegramSender
 from app.api.hub import Hub
@@ -250,6 +251,7 @@ async def _serve(
     alerts = GapAlerts(
         lambda: execution.annotate(engine.view()["rows"]),
         journal,
+        AlertRules(min_lifetime_ms=settings.feed.notify_after_s * 1000),
         on_alerts=notifier.on_alerts if notifier else None,
         on_finished=notifier.on_finished if notifier else None,
     )

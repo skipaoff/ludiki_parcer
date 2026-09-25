@@ -5,10 +5,11 @@ from app.core.alerts import AlertRules
 from app.journal.journal import Journal
 
 
-def row(key="binance:SOLUSDT|mexc:SOL_USDT", token="SOL", blocks=()):
+def row(key="binance:SOLUSDT|mexc:SOL_USDT", token="SOL", blocks=(), lifetime_ms=120_000):
     return {
         "key": key,
         "token": token,
+        "lifetime_ms": lifetime_ms,
         "long": {"exchange": "mexc", "symbol": "SOL_USDT"},
         "short": {"exchange": "binance", "symbol": "SOLUSDT"},
         "total_pct": "1.4000",
@@ -70,7 +71,14 @@ def test_gaps_already_on_screen_at_startup_are_remembered_without_being_announce
 
 
 def test_a_broken_row_does_not_take_the_loop_down():
-    h = Harness([{"key": "broken"}])
+    h = Harness([{"key": "broken", "lifetime_ms": 120_000}])
 
     assert h.alerts.check() == ["broken"]  # missing numbers are announced as empty, not as a crash
     assert h.events[-1].payload["total_pct"] is None
+
+
+def test_a_gap_that_only_flickered_never_reaches_the_journal():
+    """Вилка живёт 3 секунды — это задержка биржи, а не возможность."""
+    h = Harness([row(lifetime_ms=3_000)])
+
+    assert h.alerts.check() == [] and h.events == []
