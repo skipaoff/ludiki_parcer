@@ -428,6 +428,10 @@ async def _serve(
         print(f"Terminal Ludik {VERSION}: {url}  (Ctrl+C to stop)", flush=True)
         if open_browser:
             await asyncio.to_thread(webbrowser.open, f"{url}/#t={token}")
+        else:
+            # Nobody will read an address bar here: the link with its session token has to come from the log,
+            # which is how a terminal on a server is opened through an SSH tunnel.
+            log.info("open the interface at %s/#t=%s", url, token)
         # asyncio.wait, not await: cancelling the main task must not cancel the server mid-request.
         await asyncio.wait({server_task})
     finally:
