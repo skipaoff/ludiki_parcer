@@ -130,6 +130,7 @@ class ExchangeService:
         self._redactor = redactor
         self._factory = adapter_factory
         self._clock = clock
+        self._fees_recorded: dict[str, tuple[Decimal | None, Decimal | None]] = {}
         self._exchanges: dict[str, _Exchange] = {}
         for name in settings.enabled_names():
             key, secret, passphrase = (None, None, None) if name in READ_ONLY_EXCHANGES else self._read_keys(name)
@@ -257,6 +258,7 @@ class ExchangeService:
             "warnings": list(verdict.warnings),
             "accepted": verdict.accepted,
         }
+        self._record_fees(name, facts)
         level = Level.INFO if verdict.accepted and not verdict.warnings else Level.WARNING
         self._journal.emit(
             level,
@@ -268,6 +270,29 @@ class ExchangeService:
             errors=list(facts.errors),
         )
         return self.describe_one(name)
+
+    def _record_fees(self, name: str, facts: AccountFacts) -> None:
+        """
+        A fee change silently moves every ROI the terminal computes, so the account rate is history, not just state.
+        One row per change: a re-check that returns the same rates writes nothing.
+        """
+        taker, maker = facts.taker_fee_pct, facts.maker_fee_pct
+        if taker is None and maker is None:
+            return
+        if self._fees_recorded.get(name) == (taker, maker):
+            return
+        self._fees_recorded[name] = (taker, maker)
+        self._submit_row(
+            "fee_rates",
+            {
+                "exchange": name,
+                "instrument_id": None,
+                "taker_pct": taker,
+                "maker_pct": maker,
+                "source": "account",
+                "valid_from": datetime.fromtimestamp(self._clock(), UTC),
+            },
+        )
 
     async def check_all_with_keys(self) -> None:
         await asyncio.gather(

@@ -96,6 +96,9 @@ class Trade:
     pnl_net_pct: Decimal | None = None
     click_to_fill_ms_long: int | None = None
     click_to_fill_ms_short: int | None = None
+    total_pct_at_open: Decimal | None = None
+    funding_horizon_pct_at_open: Decimal | None = None
+    interest_at_open: int | None = None
     missing_polls: int = 0
     issues: tuple[str, ...] = ()
     liq_warned: bool = False
@@ -140,6 +143,10 @@ class Trade:
             "close_reason": self.close_reason,
             "click_to_fill_ms_long": self.click_to_fill_ms_long,
             "click_to_fill_ms_short": self.click_to_fill_ms_short,
+            # What the row promised at the click: spread plus funding, and how interesting it looked.
+            "total_pct_at_open": self.total_pct_at_open,
+            "funding_horizon_pct_at_open": self.funding_horizon_pct_at_open,
+            "interest_at_open": self.interest_at_open,
             "settings_snapshot": {
                 **self.settings,
                 "legs": {"long_symbol": self.long_symbol, "short_symbol": self.short_symbol},
@@ -465,6 +472,12 @@ class PortfolioService:
                         "pnl_now_usd": metrics.pnl_now_usd,
                         "liq_dist_long_pct": metrics.liq_distance_long_pct,
                         "liq_dist_short_pct": metrics.liq_distance_short_pct,
+                        # Funding of a position already on: what it costs per hour, what the next settlement takes,
+                        # and what it has taken so far.
+                        "funding_hourly_usd": funding.hourly_pct * notional / 100 if funding else None,
+                        "funding_next_usd": funding.next_pct * notional / 100 if funding and funding.next_pct is not None else None,
+                        "funding_next_at": _ts(funding.next_ms) if funding and funding.next_ms is not None else None,
+                        "funding_accrued_usd": trade.funding_usd,
                     },
                 )
         self._update_active()

@@ -1,4 +1,5 @@
 import asyncio
+from dataclasses import replace
 from decimal import Decimal
 
 import pytest
@@ -156,6 +157,28 @@ async def test_check_accepts_a_clean_account_and_journals_it():
     assert described["check"]["accepted"] is True
     assert described["check"]["facts"]["wallet_usdt"] == "100"
     assert ("binance", "check_ok") in harness.types()
+
+
+async def test_account_fees_are_recorded_once_per_change():
+    """A fee change moves every ROI the terminal computes, so the account rate belongs in history, not only in memory."""
+    harness = Harness()
+    service = harness.build()
+    await service.save_keys("binance", "binance-key-123456", "binance-secret-abcdef")
+
+    await service.check("binance")
+    await service.check("binance")  # same rates: nothing new to record
+
+    fees = [row for table, row in harness.rows if table == "fee_rates"]
+    assert len(fees) == 1
+    assert fees[0]["exchange"] == "binance" and fees[0]["source"] == "account"
+    assert fees[0]["taker_pct"] == Decimal("0.05") and fees[0]["maker_pct"] == Decimal("0.02")
+    assert fees[0]["valid_from"].year == 2026
+
+    harness.adapters[-1].facts = replace(GOOD_FACTS, taker_fee_pct=Decimal("0.04"))
+    await service.check("binance")
+
+    fees = [row for table, row in harness.rows if table == "fee_rates"]
+    assert [row["taker_pct"] for row in fees] == [Decimal("0.05"), Decimal("0.04")]
 
 
 async def test_withdrawal_enabled_key_is_rejected():

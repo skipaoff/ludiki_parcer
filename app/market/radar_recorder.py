@@ -1,5 +1,5 @@
 """
-VFP: Once a minute, stores best prices, mark, index and 24h turnover of every contract in the catalog into `radar_snapshots` for future backtests.
+VFP: Once a minute, stores best prices, mark, index, 24h turnover and the funding rate of every contract in the catalog into `radar_snapshots` for future backtests.
 Changes when: the radar snapshot contents or cadence change.
 Anti-goal:
 1. Storing contracts without a catalog id — snapshots must join to `instruments`.
@@ -13,6 +13,7 @@ import time
 from datetime import UTC, datetime
 from typing import Any, Callable, Protocol
 
+from app.core.funding import FundingRate
 from app.instruments.service import PairRecord
 from app.market.state import MarketState
 
@@ -24,7 +25,15 @@ class Catalog(Protocol):
     def records(self) -> list[PairRecord]: ...
 
 
-def snapshot_rows(records: list[PairRecord], state: MarketState, now_ms: float) -> list[dict[str, Any]]:
+Funding = Callable[[str, str], FundingRate | None]
+
+
+def snapshot_rows(
+    records: list[PairRecord],
+    state: MarketState,
+    now_ms: float,
+    funding: Funding = lambda exchange, symbol: None,
+) -> list[dict[str, Any]]:
     rows = []
     seen: set[int] = set()
     ts = datetime.fromtimestamp(now_ms / 1000, UTC)
@@ -43,6 +52,8 @@ def snapshot_rows(records: list[PairRecord], state: MarketState, now_ms: float) 
             fresh_top = top is not None and now_ms - top.received_ms <= MAX_AGE_MS
             fresh_mark = mark is not None and now_ms - mark.received_ms <= MAX_AGE_MS
             volume = mark.volume24h_usd if fresh_mark and mark.volume24h_usd is not None else catalog_volume
+            # Holding cost of a gap is funding; without the rate a backtest on this history could only price entry.
+            rate = funding(instrument.exchange, instrument.symbol_raw)
             rows.append(
                 {
                     "ts": ts,
@@ -52,6 +63,11 @@ def snapshot_rows(records: list[PairRecord], state: MarketState, now_ms: float) 
                     "mark": mark.mark if fresh_mark else None,
                     "index_price": mark.index if fresh_mark else None,
                     "volume24h_usd": volume,
+                    "funding_rate_pct": None if rate is None else rate.rate_pct,
+                    "funding_interval_h": None if rate is None else rate.interval_hours,
+                    "funding_next_at": None
+                    if rate is None or rate.next_ms is None
+                    else datetime.fromtimestamp(rate.next_ms / 1000, UTC),
                 }
             )
     return rows
@@ -64,7 +80,9 @@ class RadarRecorder:
         state: MarketState,
         submit: Callable[[str, dict[str, Any]], None],
         clock_ms: Callable[[], float] = lambda: time.time() * 1000,
+        funding: Funding = lambda exchange, symbol: None,
     ) -> None:
+        self._funding = funding
         self._catalog = catalog
         self._state = state
         self._submit = submit
@@ -78,7 +96,7 @@ class RadarRecorder:
             self.record()
 
     def record(self) -> int:
-        rows = snapshot_rows(self._catalog.records(), self._state, self._clock_ms())
+        rows = snapshot_rows(self._catalog.records(), self._state, self._clock_ms(), self._funding)
         for row in rows:
             self._submit("radar_snapshots", row)
         if rows:

@@ -206,7 +206,7 @@ async def _serve(
         funding=funding.rate,
     )
     feed_settings = FeedSettingsService(engine, database, journal)
-    radar_recorder = RadarRecorder(instruments, market, writer.submit)
+    radar_recorder = RadarRecorder(instruments, market, writer.submit, funding=funding.rate)
     order_events = OrderEvents()
     execution = ExecutionService(
         settings.trading,
@@ -220,6 +220,7 @@ async def _serve(
         taker_fee_pct,
         balance_max_age_ms=portfolio_settings.balances_poll_s * 2_000 + 5_000,
         order_events=order_events,
+        funding=funding.rate,
     )
     private_streams = PrivateStreams(
         exchanges.adapter,
