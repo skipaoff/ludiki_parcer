@@ -17,6 +17,7 @@ from typing import Any, Iterable
 import aiohttp
 import orjson
 
+from app.system.tls import client_session
 from app.market.state import MarketState
 from app.market.ws import ManagedSocket
 
@@ -144,7 +145,7 @@ class MexcMarket:
 
     async def _poll_tickers(self) -> None:
         timeout = aiohttp.ClientTimeout(total=5)
-        async with aiohttp.ClientSession(timeout=timeout) as session:
+        async with client_session(timeout=timeout) as session:
             while True:
                 started = time.monotonic()
                 try:

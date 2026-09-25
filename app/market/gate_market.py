@@ -18,6 +18,7 @@ from typing import Any, Iterable
 import aiohttp
 import orjson
 
+from app.system.tls import client_session
 from app.market.state import MarketState
 from app.market.ws import ManagedSocket
 
@@ -143,7 +144,7 @@ class GateMarket:
 
     async def _poll_tickers(self) -> None:
         # The list is 0.5 MB and can take several seconds to arrive; its prices are dated from the request, not the arrival.
-        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=TICKERS_TIMEOUT_S)) as session:
+        async with client_session(timeout=aiohttp.ClientTimeout(total=TICKERS_TIMEOUT_S)) as session:
             while True:
                 started = time.monotonic()
                 try:

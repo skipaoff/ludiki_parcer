@@ -13,8 +13,11 @@ from dataclasses import dataclass, field
 from typing import Any, Iterable, Mapping
 
 # Reasons that say "this account cannot trade yet", not "this gap is no good". A gap worth taking is still worth
-# knowing about while trading is off — that is the state the terminal ships in.
-ACCOUNT_BLOCKS = frozenset({"trading_disabled", "keys_not_accepted", "not_warmed_up", "max_open_pairs", "max_total_usd"})
+# knowing about while trading is off — that is the state the terminal ships in, and without keys every row also
+# carries balance_unknown (checked live on macOS 25.09.2026: without it nothing would ever be announced).
+ACCOUNT_BLOCKS = frozenset(
+    {"trading_disabled", "keys_not_accepted", "not_warmed_up", "max_open_pairs", "max_total_usd", "balance_unknown"}
+)
 
 
 @dataclass(frozen=True, slots=True)

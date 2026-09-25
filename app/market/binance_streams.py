@@ -23,6 +23,7 @@ from typing import Any, Iterable
 import aiohttp
 import orjson
 
+from app.system.tls import client_session
 from app.market.state import MarketState
 from app.market.ws import ManagedSocket
 
@@ -155,7 +156,7 @@ class BinanceStreams:
         timeout = aiohttp.ClientTimeout(total=10)
         interval = SEED_INTERVAL_S if self._radar_poll_s is None else self._radar_poll_s
         last_error_log = 0.0
-        async with aiohttp.ClientSession(timeout=timeout) as session:
+        async with client_session(timeout=timeout) as session:
             while True:
                 started = time.monotonic()
                 try:

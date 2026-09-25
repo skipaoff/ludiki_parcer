@@ -44,6 +44,13 @@ def test_trading_being_off_still_announces_the_gap_but_says_why_it_cannot_be_cli
     assert len(alerts) == 1 and alerts[0].blocks == ("trading_disabled", "keys_not_accepted")
 
 
+def test_a_terminal_without_keys_still_announces_gaps():
+    """Without keys every row carries balance_unknown; treating it as a market block would silence the terminal."""
+    blocks = ["trading_disabled", "keys_not_accepted", "balance_unknown:long", "balance_unknown:short", "not_warmed_up"]
+
+    assert len(decide([row(blocks=blocks)], {}, now_ms=1_000, rules=RULES)[0]) == 1
+
+
 def test_a_gap_the_market_blocks_is_silent():
     for blocks in (["stale"], ["book_too_thin"], ["exchange_read_only:variational"], ["manual_only"], ["insufficient_margin:mexc"]):
         assert decide([row(blocks=blocks)], {}, now_ms=1_000, rules=RULES)[0] == []

@@ -18,6 +18,7 @@ from typing import Any, Iterable
 import aiohttp
 import orjson
 
+from app.system.tls import client_session
 from app.market.depth_pool import BookBuffer, DepthPool, Poller
 from app.market.state import MarketState
 
@@ -83,7 +84,7 @@ class KucoinMarket:
         self._contracts = Poller("kucoin contracts", CONTRACTS_POLL_S, self._poll_contracts)
 
     async def _socket_url(self) -> str:
-        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10)) as session:
+        async with client_session(timeout=aiohttp.ClientTimeout(total=10)) as session:
             async with session.post(BULLET_URL) as response:
                 response.raise_for_status()
                 bullet = (orjson.loads(await response.read()))["data"]
@@ -116,7 +117,7 @@ class KucoinMarket:
     async def run(self) -> None:
         self._pool.start()
         try:
-            async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=15)) as session:
+            async with client_session(timeout=aiohttp.ClientTimeout(total=15)) as session:
                 self._session = session
                 await asyncio.gather(self._tickers.run(), self._contracts.run(), self._buffer.run())
         finally:

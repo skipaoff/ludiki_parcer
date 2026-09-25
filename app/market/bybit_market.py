@@ -17,6 +17,7 @@ from typing import Any, Iterable
 import aiohttp
 import orjson
 
+from app.system.tls import client_session
 from app.market.depth_pool import BookBuffer, DepthPool, Poller
 from app.market.state import MarketState
 
@@ -129,7 +130,7 @@ class BybitMarket:
     async def run(self) -> None:
         self._pool.start()
         try:
-            async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=5)) as session:
+            async with client_session(timeout=aiohttp.ClientTimeout(total=5)) as session:
                 self._session = session
                 await asyncio.gather(self._poller.run(), self._buffer.run())
         finally:

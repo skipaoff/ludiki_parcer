@@ -16,6 +16,7 @@ from typing import Any, Iterable
 import aiohttp
 import orjson
 
+from app.system.tls import client_session
 from app.market.depth_pool import DepthPool, Poller
 from app.market.state import MarketState
 
@@ -91,7 +92,7 @@ class HyperliquidMarket:
     async def run(self) -> None:
         self._pool.start()
         try:
-            async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10)) as session:
+            async with client_session(timeout=aiohttp.ClientTimeout(total=10)) as session:
                 self._session = session
                 await self._poller.run()
         finally:

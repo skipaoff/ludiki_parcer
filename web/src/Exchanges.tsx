@@ -20,7 +20,7 @@ const VERDICT_TEXT: Record<string, string> = {
   no_ip_restriction: "ключ без привязки к IP — у части бирж такие ключи ограничены по сроку",
   no_free_balance: "нет свободного USDT на фьючерсном счёте",
   fees_unknown: "комиссии аккаунта не получены",
-  clock_offset: "часы компьютера расходятся с биржей — включите синхронизацию времени Windows",
+  clock_offset: "часы компьютера расходятся с биржей — включите синхронизацию времени в системе",
 };
 
 // What the two key fields hold on exchanges that do not use a plain API key and secret.
@@ -104,7 +104,7 @@ export function ExchangesSettings({ token, live }: { token: string; live: Exchan
         />
       ))}
       <p className="muted">
-        Ключи хранятся в Диспетчере учётных данных Windows и в интерфейс не возвращаются. Выпускайте ключи только с правами на
+        Ключи хранятся в хранилище ключей системы (Диспетчер учётных данных на Windows, связка ключей на macOS) и в интерфейс не возвращаются. Выпускайте ключи только с правами на
         чтение и фьючерсы, без вывода.
       </p>
     </>
@@ -166,7 +166,7 @@ function ExchangeCard({
   };
 
   const remove = async () => {
-    if (!window.confirm(`Удалить ключи ${exchangeTitle(exchange)} из Диспетчера учётных данных?`)) return;
+    if (!window.confirm(`Удалить ключи ${exchangeTitle(exchange)} из хранилища ключей системы?`)) return;
     await run("удаление", () => apiSend<ExchangeDetails>("DELETE", `/api/exchanges/${exchange.name}/keys`, token));
   };
 

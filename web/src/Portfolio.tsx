@@ -70,7 +70,7 @@ export function PortfolioColumn({ token, snapshot }: { token: string; snapshot: 
             {" "}
             · лимит {snapshot?.pairs.limit ?? 0}
           </span>
-          {snapshot?.pairs.sleep_blocked ? <span className="muted"> · сон Windows запрещён</span> : null}
+          {snapshot?.pairs.sleep_blocked ? <span className="muted"> · сон компьютера запрещён</span> : null}
         </span>
         <button
           className="action"

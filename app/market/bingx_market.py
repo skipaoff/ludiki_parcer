@@ -21,6 +21,7 @@ from typing import Any, Iterable
 import aiohttp
 import orjson
 
+from app.system.tls import client_session
 from app.market.state import MarketState
 from app.market.ws import ManagedSocket
 
@@ -144,7 +145,7 @@ class BingxMarket:
         for socket in self._sockets:
             self._start(socket)
         try:
-            async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=5)) as session:
+            async with client_session(timeout=aiohttp.ClientTimeout(total=5)) as session:
                 await asyncio.gather(self._poll_tickers(session), self._poll_premium(session))
         finally:
             for task in self._tasks.values():
