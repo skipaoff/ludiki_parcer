@@ -103,3 +103,28 @@ async def storage_usage(pool: asyncpg.Pool) -> dict[str, Any]:
         "SELECT count(*) FROM opportunity_episodes WHERE entered_feed_at >= now() - interval '24 hours'"
     )
     return {"database_bytes": database_bytes, "hypertables": tables, "episodes_24h": episodes_day}
+
+
+async def feed_seconds_by_pair(pool: asyncpg.Pool, hours: int = 24) -> dict[int, float]:
+    """
+    Seconds each pair spent in the feed over the window, the current episode included.
+
+    A discrepancy that keeps coming back is not news, and the terminal forgets that across a restart: the
+    episode clock starts at zero every launch. The recorded history does not, so it answers instead.
+    """
+    rows = await pool.fetch(
+        """
+        SELECT pair_id,
+               sum(extract(epoch FROM (
+                   least(coalesce(ended_at, now()), now())
+                   - greatest(entered_feed_at, now() - make_interval(hours => $1))
+               ))) AS seconds
+        FROM opportunity_episodes
+        WHERE pair_id IS NOT NULL
+          AND entered_feed_at IS NOT NULL
+          AND coalesce(ended_at, now()) >= now() - make_interval(hours => $1)
+        GROUP BY pair_id
+        """,
+        hours,
+    )
+    return {int(row["pair_id"]): max(0.0, float(row["seconds"] or 0)) for row in rows}

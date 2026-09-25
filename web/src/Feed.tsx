@@ -85,6 +85,11 @@ interface Group {
   others: FeedRow[];
 }
 
+/** How long this gap has been standing: this run's time in the feed, or the recorded day's, whichever is longer. */
+function standingMs(row: FeedRow): number {
+  return Math.max(row.in_feed_ms ?? 0, row.in_feed_24h_ms ?? 0);
+}
+
 function ageText(ms: number): string {
   const minutes = Math.round(ms / 60_000);
   return minutes < 90 ? `${minutes} мин` : `${Math.round(minutes / 60)} ч`;
@@ -399,10 +404,15 @@ function GapLine({
           row.token
         )}
         {row.suspicious ? " ?" : ""}
-        {row.in_feed_ms !== null && row.in_feed_ms > LONG_STANDING_MS && (
+        {standingMs(row) > LONG_STANDING_MS && (
           // A gap this old is the state of the market rather than a chance: it is shown with its age.
-          <span className="chip chip-note" title="столько эта вилка стоит в ленте — такие обычно не сходятся">
-            {ageText(row.in_feed_ms)}
+          <span
+            className="chip chip-note"
+            title={`столько эта вилка стоит в ленте за последние сутки — такие обычно не сходятся${
+              row.in_feed_ms ? `; в этом запуске ${ageText(row.in_feed_ms)}` : ""
+            }`}
+          >
+            {ageText(standingMs(row))}
           </span>
         )}
       </td>
@@ -584,7 +594,7 @@ export function FeedScreen({ token, snapshot }: { token: string; snapshot: Snaps
       if (watched.size > 0 && !(watched.has(row.long?.exchange ?? "") && watched.has(row.short?.exchange ?? ""))) {
         return drop("биржа не выбрана");
       }
-      if (!filters.showLongStanding && row.in_feed_ms !== null && row.in_feed_ms > LONG_STANDING_MS) return drop("давно висят");
+      if (!filters.showLongStanding && standingMs(row) > LONG_STANDING_MS) return drop("давно висят");
       if (!filters.showReadOnly && (READ_ONLY.has(row.long?.exchange ?? "") || READ_ONLY.has(row.short?.exchange ?? ""))) {
         return drop("без торговли");
       }
@@ -712,7 +722,7 @@ export function FeedScreen({ token, snapshot }: { token: string; snapshot: Snaps
             </label>
             <label
               className="check-label"
-              title="Вилки, которые держатся в ленте дольше получаса. Из 941 записанной вилки половина уходила за три минуты, девять из десяти — за 25; то, что стоит дольше, обычно не сходится вовсе: разные индексы, закрытые переводы, акции вне торговой сессии."
+              title="Вилки, которые за последние сутки простояли в ленте дольше получаса — считается по записанной истории, поэтому перезапуск терминала их не возвращает. Из 941 записанной вилки половина уходила за три минуты, девять из десяти — за 25; то, что стоит дольше, обычно не сходится вовсе: разные индексы, закрытые переводы, акции вне торговой сессии."
             >
               <input type="checkbox" checked={filters.showLongStanding} onChange={(event) => set("showLongStanding", event.target.checked)} />{" "}
               давно висят

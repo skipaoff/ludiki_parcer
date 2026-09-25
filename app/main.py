@@ -53,6 +53,7 @@ from app.system.keep_awake import KeepAwake
 from app.storage import history as history_queries
 from app.storage import trades_history
 from app.strategies.price_gap.engine import PriceGapEngine
+from app.strategies.price_gap.standing import StandingGaps
 from app.strategies.price_gap.recorder import EpisodeRecorder
 from app.strategies.price_gap.settings import FeedSettingsService
 from app.journal.journal import Journal, Level
@@ -192,6 +193,8 @@ async def _serve(
         funding=funding.rate,
     )
     recorder = EpisodeRecorder(writer.submit, feed_snapshot)
+    # A gap that keeps standing is remembered across restarts: the episode clock starts at zero, history does not.
+    standing = StandingGaps(database)
     engine = PriceGapEngine(
         instruments,
         market,
@@ -206,6 +209,7 @@ async def _serve(
         fresh_ms_overrides={"variational": settings.exchanges.variational.max_quote_age_ms, "hyperliquid": HYPERLIQUID_BOOK_FRESH_MS},
         top_limit_ms_overrides={"variational": settings.exchanges.variational.max_quote_age_ms},
         funding=funding.rate,
+        standing_seconds=standing.seconds,
     )
     feed_settings = FeedSettingsService(engine, database, journal)
     radar_recorder = RadarRecorder(instruments, market, writer.submit, funding=funding.rate)
@@ -343,6 +347,7 @@ async def _serve(
         *(asyncio.create_task(feed.run()) for feed in feeds.values()),
         asyncio.create_task(funding.run()),
         asyncio.create_task(engine.run()),
+        asyncio.create_task(standing.run()),
         asyncio.create_task(radar_recorder.run()),
         asyncio.create_task(portfolio.run_positions()),
         asyncio.create_task(portfolio.run_balances()),

@@ -146,13 +146,16 @@ class PriceGapEngine:
         fresh_ms_overrides: Mapping[str, int] | None = None,
         funding: Callable[[str, str], FundingRate | None] = lambda exchange, symbol: None,
         top_limit_ms_overrides: Mapping[str, int] | None = None,
+        standing_seconds: Callable[[int | None], float] = lambda pair_id: 0.0,
     ) -> None:
         """
         feeds maps an exchange name to its order-book subscriptions; on_catalog receives every catalog contract;
         fresh_ms_overrides gives venues with slower quotes their own freshness limit (their quotes need no confirmation);
         funding(exchange, raw symbol) gives the current funding rate of a contract, None when unknown;
-        top_limit_ms_overrides gives venues with slow quotes a shorter age limit for best prices in the radar.
+        top_limit_ms_overrides gives venues with slow quotes a shorter age limit for best prices in the radar;
+        standing_seconds(pair_id) tells how long this pair already stood in the feed over the last day.
         """
+        self._standing_seconds = standing_seconds
         self._funding = funding
         self._top_limits = dict(top_limit_ms_overrides or {})
         self._fresh_overrides = dict(fresh_ms_overrides or {})
@@ -601,6 +604,7 @@ class PriceGapEngine:
                 long,
                 short,
                 None if quote is None else (quote.qty_tokens, quote.size_usd, quote.roi_net_pct, quote.capacity_usd, quote.problem),
+                self._standing_seconds(record.pair_id),
             )
             memo = self._row_memo.get(record.key)
             if memo is not None and memo[0] == memo_signature:
@@ -649,6 +653,8 @@ class PriceGapEngine:
             # Counted from the moment the gap appeared, so a feed row shows at least the required minimum lifetime.
             "lifetime_ms": lifetime_ms,
             "in_feed_ms": in_feed_ms,
+            # The same, but remembered across restarts: recorded history knows a gap that keeps coming back.
+            "in_feed_24h_ms": int(self._standing_seconds(record.pair_id) * 1000),
             "volume24h_weak_usd": _text(assessment.volume24h_weak_usd, 6),
             "suspicious": record.suspicious,
             "manual_only": record.manual_only,
