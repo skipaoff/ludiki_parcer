@@ -65,11 +65,13 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts\windows\create_deskt
 .venv\Scripts\python.exe scripts\trial_trade.py binance --demo --i-understand
 ```
 
-```bat
-.venv\Scripts\python.exe scripts\trial_trade.py mexc --i-understand
+```bash
+.venv/bin/python scripts/trial_trade.py binance --demo --i-understand
 ```
 
-4. `enabled = true`, плечо и лимиты в разделе `[trading]`, перезапуск `ludik.cmd`.
+Дальше так же для каждой биржи, где есть ключи: `mexc`, `gate`, `aster`, `bingx`, `bybit`, `bitget`, `kucoin`, `hyperliquid`.
+
+4. `enabled = true`, плечо и лимиты в разделе `[trading]`, перезапуск терминала.
 5. Первая пара — на минимальном размере над лентой; сверка цен, комиссий и PnL с биржами.
 
 ## Окружение (Windows 11)
@@ -106,15 +108,21 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts\windows\create_deskt
 
 При первом чтении пароля macOS спросит, можно ли Python обратиться к связке ключей: **Always Allow**.
 
-Последний шаг — свой `config.toml` с путём к бинарникам PostgreSQL (у Homebrew они не в `PATH`):
+Дальше можно запускать: `config.toml` для этого не нужен. Терминал ищет бинарники PostgreSQL по очереди — в папке из настроек, в `PATH`, затем в префиксах Homebrew. Свой `config.toml` нужен, только если ты хочешь поменять настройки:
 
 ```bash
 cp config.example.toml config.toml
-# в нём: pg_bin_dir = "/opt/homebrew/opt/postgresql@18/bin"   (путь печатает setup.sh)
-./ludik.sh
 ```
 
-Данные терминала лежат рядом с репозиторием, в `../ludik-data`: кластер PostgreSQL, буфер записи `spool`, логи `logs`. Ярлыка на рабочем столе на macOS нет — терминал запускается из `./ludik.sh`.
+Данные терминала лежат рядом с репозиторием, в `../ludik-data`: кластер PostgreSQL, буфер записи `spool`, логи `logs`.
+
+**Ярлык на рабочем столе:**
+
+```bash
+./scripts/macos/create_desktop_shortcut.sh
+```
+
+Создаёт «Terminal Ludik.command»: он открывает Терминал, запускает терминал и оставляет окно, если запуск не удался. Повторно — с `--force`.
 
 ## Структура
 
@@ -149,6 +157,7 @@ tests/                  тесты: ядро, конфиг, ключи, журн
 scripts/
   windows/              ярлык на рабочем столе и иконка
   macos/setup.sh        разовая установка на Mac: кластер, база, пароль в связке ключей
+  macos/create_desktop_shortcut.sh   ярлык на рабочем столе для Mac
 .github/workflows/      CI: тесты на Ubuntu и Windows, сборка интерфейса, схема на PostgreSQL 18 + TimescaleDB
 ludik.cmd               запуск одной командой на Windows
 ludik.sh                то же на macOS и Linux
@@ -185,6 +194,7 @@ CI повторяет все проверки при каждом пуше в `m
 
 - **Где что решено.** Все решения и дорожная карта — в `docs/PLAN.md`. Если решение меняется, план правится в том же PR, что и код.
 - **Ветки.** Одна ветка на этап или задачу (`stage-1-exchanges`), в `main` через pull request с зелёным CI.
+- **Обе системы равны.** Терминал работает на Windows 11 и на macOS; тесты в CI идут на обеих плюс Ubuntu. Платформенное поведение (сон, поиск PostgreSQL, ярлык) живёт в отдельных файлах и покрыто тестами, а не разбросано по коду.
 - **Паспорт файла.** Новый файл начинается с паспорта: VFP / Changes when / Anti-goal.
 - **Где живут решения.** Решения — чистые функции в `app/core/` с тестами. Сеть, база и время — только в оболочке.
 - **Миграции.** Применённый файл `db/NNN_*.sql` не редактируется: изменение — новый файл со следующим номером. Терминал сверяет контрольные суммы и не стартует запись при расхождении.

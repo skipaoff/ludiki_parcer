@@ -1,5 +1,6 @@
 # VFP: Every push and pull request proves the terminal's code, interface build and database schema still work.
 # Changes when: the Python or Node version range, the operating systems, the database image or the checked artifacts change.
+# The terminal is run on Windows and on macOS, so the test matrix covers both; Ubuntu keeps the database job honest.
 # Anti-goal:
 # 1. Real exchange API keys or calls to live exchanges in CI.
 
@@ -17,7 +18,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest]
+        os: [ubuntu-latest, windows-latest, macos-latest]
         python-version: ["3.12", "3.13"]
     steps:
       - uses: actions/checkout@v5

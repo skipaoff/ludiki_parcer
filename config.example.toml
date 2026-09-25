@@ -1,5 +1,6 @@
 # Terminal ludik — non-secret settings.
-# Copy to config.toml and edit. API keys and passwords never go here: they live in Windows Credential Manager.
+# Copy to config.toml and edit. API keys and passwords never go here: they live in the credential store of the
+# system — Credential Manager on Windows, the login keychain on macOS.
 # Relative paths are resolved against the folder of this file.
 
 [server]
@@ -20,7 +21,7 @@ port = 5432
 name = "ludik"
 user = "ludik"
 autostart = true            # start the local cluster with pg_ctl when it is not running
-pg_bin_dir = "../ludik-data/pgsql/bin"
+pg_bin_dir = "../ludik-data/pgsql/bin"   # Windows bundle; if it is not there, PATH and the Homebrew prefixes are searched
 pg_data_dir = "../ludik-data/pgdata"
 connect_timeout_s = 5
 
