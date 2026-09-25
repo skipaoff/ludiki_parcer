@@ -22,7 +22,7 @@ jobs:
         python-version: ["3.12", "3.13"]
     steps:
       - uses: actions/checkout@v5
-      - uses: astral-sh/setup-uv@v10
+      - uses: astral-sh/setup-uv@v10.2.0
       - run: uv sync --frozen --python ${{ matrix.python-version }}
       - run: uv run --frozen --python ${{ matrix.python-version }} pytest -q
 
@@ -71,7 +71,7 @@ jobs:
         run: |
           psql -v ON_ERROR_STOP=1 -At -c "SELECT hypertable_name FROM timescaledb_information.hypertables ORDER BY 1"
           psql -v ON_ERROR_STOP=1 -At -c "SELECT proc_name, hypertable_name FROM timescaledb_information.jobs WHERE hypertable_name IS NOT NULL ORDER BY 1, 2"
-      - uses: astral-sh/setup-uv@v10
+      - uses: astral-sh/setup-uv@v10.2.0
       - name: Terminal migration runner on a fresh database
         run: |
           psql -v ON_ERROR_STOP=1 -c "CREATE DATABASE ludik_test"
