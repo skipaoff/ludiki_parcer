@@ -66,6 +66,7 @@ async def test_repository_migrations_apply_once_on_a_fresh_database():
     finally:
         await connection.close()
 
-    assert recorded == ["001_schema.sql", "002_timescale.sql"]
+    # Whatever db/ holds: a new migration must not make this test a chore to update.
+    assert recorded == sorted(path.name for path in (REPO_ROOT / "db").glob("*.sql"))
     assert again == []
     assert hypertables == 5
