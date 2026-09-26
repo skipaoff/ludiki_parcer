@@ -251,6 +251,8 @@ class TelegramSettings(_Section):
     digest_at: str = ""
     """Время ежедневной сводки, "09:00"; пусто — не слать."""
     alarms: bool = True
+    outage_after_min: int = Field(default=15, ge=0)
+    """Сколько биржа должна молчать, чтобы это стало аварией: короткие обрывы случаются постоянно."""
     send_outcome: bool = True
     max_messages_per_hour: int = Field(default=60, ge=0)
 

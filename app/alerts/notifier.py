@@ -12,7 +12,7 @@ from __future__ import annotations
 import logging
 from collections import deque
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from decimal import Decimal
 from typing import Any, Callable
 
@@ -45,6 +45,13 @@ QUIET_ALARMS = frozenset({"link_up", "db_connected", "started", "stopped"})
 """Recoveries and lifecycle: worth a line, never worth waking someone at night."""
 RECOVERIES = {"link_up": "link_down", "db_connected": "db_unavailable"}
 """A recovery is news only after the break it recovers from: every start reports ten healthy exchanges."""
+HELD_ALARMS = frozenset({"link_down", "db_unavailable"})
+"""
+Connection breaks wait before they are told. An exchange goes quiet for a few seconds all the time — the terminal
+notices after two failed probes and recovers on the next one, and that is not a problem anyone can act on.
+A break that outlives the hold is a different thing, and it says how long it has lasted.
+Money alarms — a lost leg, a near liquidation — are never held.
+"""
 
 
 @dataclass(frozen=True, slots=True)
@@ -97,6 +104,7 @@ class TelegramNotifier:
         self.skipped_threshold = 0
         self.skipped_rate = 0
         self._broken: set[tuple[str, str | None]] = set()
+        self._pending: dict[tuple[str, str | None], datetime] = {}
 
     # ── gaps ────────────────────────────────────────────────────────────────
 
@@ -141,16 +149,37 @@ class TelegramNotifier:
                 return
         broken_by = RECOVERIES.get(event.type)
         if broken_by is not None:
-            # Nothing was broken, so nothing recovered: a restart sees ten healthy exchanges and must stay silent.
-            if (broken_by, event.exchange) not in self._broken:
+            subject = (broken_by, event.exchange)
+            # A break that never outlived the hold was never told, so its recovery is not news either.
+            if self._pending.pop(subject, None) is not None:
                 return
-            self._broken.discard((broken_by, event.exchange))
-        elif event.type in RECOVERIES.values():
-            self._broken.add((event.type, event.exchange))
+            # Nothing was broken, so nothing recovered: a restart sees ten healthy exchanges and must stay silent.
+            if subject not in self._broken:
+                return
+            self._broken.discard(subject)
+        elif event.type in HELD_ALARMS:
+            self._pending.setdefault((event.type, event.exchange), self._now())
+            return
         detail = ", ".join(
             str(value) for key, value in (("exchange", event.exchange), *sorted(event.payload.items())) if value not in (None, "")
         )
         self._sender.post(alarm(event.type, detail))
+
+    def flush_outages(self) -> list[str]:
+        """Tell about the breaks that outlived the hold, once each, with how long they have lasted."""
+        hold = timedelta(minutes=self._settings.outage_after_min)
+        now = self._now()
+        told: list[str] = []
+        for subject, since in list(self._pending.items()):
+            if now - since < hold:
+                continue
+            kind, exchange = subject
+            self._pending.pop(subject, None)
+            self._broken.add(subject)
+            detail = ", ".join(part for part in (exchange, f"{int((now - since).total_seconds() // 60)} мин") if part)
+            self._sender.post(alarm(kind, detail))
+            told.append(f"{kind}:{exchange}")
+        return told
 
     def send_digest(self, numbers: DigestNumbers) -> None:
         self._sender.post(digest(numbers))

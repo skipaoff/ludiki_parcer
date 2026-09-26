@@ -259,6 +259,17 @@ async def _serve(
         on_finished=notifier.on_finished if notifier else None,
     )
 
+    async def run_outages() -> None:
+        """Breaks are told only after they outlive the hold; this loop is what makes the waiting end."""
+        if notifier is None:
+            return
+        while True:
+            await asyncio.sleep(30)
+            try:
+                notifier.flush_outages()
+            except Exception as exc:
+                log.warning("outage alarms failed: %s", exc)
+
     async def run_digest() -> None:
         """One summary a day at the configured hour; it is skipped when the database cannot answer."""
         if notifier is None or not settings.telegram.digest_at:
@@ -418,7 +429,11 @@ async def _serve(
         asyncio.create_task(execution.run_warmup()),
         asyncio.create_task(private_streams.run()),
         asyncio.create_task(alerts.run()),
-        *( [asyncio.create_task(telegram.run()), asyncio.create_task(run_digest())] if telegram else [] ),
+        *(
+            [asyncio.create_task(telegram.run()), asyncio.create_task(run_digest()), asyncio.create_task(run_outages())]
+            if telegram
+            else []
+        ),
     ]
     server_task = asyncio.create_task(server.serve())
     try:

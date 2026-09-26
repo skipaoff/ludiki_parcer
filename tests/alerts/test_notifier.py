@@ -1,6 +1,6 @@
 """What reaches the phone: the thresholds, the quiet window, the ceiling, and the outcome of a gap."""
 
-from datetime import datetime
+from datetime import datetime, timedelta
 from decimal import Decimal
 
 from app.alerts.notifier import TelegramNotifier, parse_quiet_hours
@@ -52,13 +52,27 @@ def alert(key="pair", token="SOL", total="1.6700", interest=73) -> GapAlert:
     )
 
 
+class Clock:
+    """Часы, которые можно подвинуть: выдержка аварии проверяется именно временем, а не числом вызовов."""
+
+    def __init__(self, at: datetime):
+        self.at = at
+
+    def __call__(self) -> datetime:
+        return self.at
+
+    def advance(self, minutes: float) -> None:
+        self.at += timedelta(minutes=minutes)
+
+
 def notifier(clock=datetime(2026, 9, 26, 12, 0), **settings):
+    tick = clock if isinstance(clock, Clock) else Clock(clock)
     sender = FakeSender()
     made = TelegramNotifier(
         sender,
         TelegramSettings(enabled=True, chats=("480399842", "944522988"), **settings),
         horizon_h=lambda: "8",
-        now=lambda: clock,
+        now=tick,
     )
     return made, sender
 
@@ -177,20 +191,87 @@ def test_alarms_reach_the_phone_even_at_night():
 
 def test_the_alarm_names_are_the_ones_the_journal_actually_emits():
     """Выдуманные имена означали бы, что настоящий обрыв связи до телефона не доедет."""
-    made, sender = notifier()
+    clock = Clock(datetime(2026, 9, 26, 12, 0))
+    made, sender = notifier(clock=clock)
     made.on_event(event("link_down", level=Level.WARNING, exchange="mexc"))
+    clock.advance(20)
+    made.flush_outages()
 
     assert "нет связи с биржей" in sender.posts[0][0].text
 
 
+def test_a_blink_of_a_connection_is_not_an_alarm():
+    """Биржа отвалилась и через пять секунд вернулась — это задержка, а не проблема, и будить некого."""
+    clock = Clock(datetime(2026, 9, 26, 12, 0))
+    made, sender = notifier(clock=clock)
+    made.on_event(event("link_down", level=Level.WARNING, exchange="mexc"))
+
+    clock.advance(0.1)
+    made.flush_outages()
+    made.on_event(event("link_up", level=Level.INFO, exchange="mexc"))
+    clock.advance(30)
+    made.flush_outages()
+
+    assert sender.posts == []  # ни про обрыв, ни про восстановление
+
+
+def test_an_exchange_quiet_longer_than_the_hold_is_told_once_with_its_length():
+    clock = Clock(datetime(2026, 9, 26, 12, 0))
+    made, sender = notifier(clock=clock)
+    made.on_event(event("link_down", level=Level.WARNING, exchange="mexc"))
+
+    clock.advance(14)
+    made.flush_outages()
+    assert sender.posts == []  # четырнадцать минут — ещё терпим
+
+    clock.advance(2)
+    made.flush_outages()
+    assert len(sender.posts) == 1
+    assert "нет связи с биржей" in sender.posts[0][0].text and "16 мин" in sender.posts[0][0].text
+
+    clock.advance(60)
+    made.flush_outages()
+    assert len(sender.posts) == 1  # об одном обрыве — одно сообщение
+
+
+def test_a_repeated_break_while_it_lasts_does_not_restart_the_hold():
+    """Пробы падают каждые десять секунд; отсчёт идёт от первой, иначе авария не наступит никогда."""
+    clock = Clock(datetime(2026, 9, 26, 12, 0))
+    made, sender = notifier(clock=clock)
+    for _ in range(90):
+        made.on_event(event("link_down", level=Level.WARNING, exchange="mexc"))
+        clock.advance(0.2)
+        made.flush_outages()
+
+    assert len(sender.posts) == 1
+
+
+def test_the_hold_can_be_switched_off_for_someone_who_wants_every_blink():
+    made, sender = notifier(outage_after_min=0)
+    made.on_event(event("link_down", level=Level.WARNING, exchange="mexc"))
+    made.flush_outages()
+
+    assert len(sender.posts) == 1
+
+
+def test_a_money_alarm_never_waits_for_a_hold():
+    made, sender = notifier()
+    made.on_event(event("leg_lost", trade_id=7))
+
+    assert len(sender.posts) == 1
+
+
 def test_a_recovery_is_silent_unless_something_broke_first():
     """Каждый перезапуск видит десять живых бирж; «связь восстановлена» по каждой — это спам."""
-    made, sender = notifier()
+    clock = Clock(datetime(2026, 9, 26, 12, 0))
+    made, sender = notifier(clock=clock)
     made.on_event(event("link_up", level=Level.INFO, exchange="mexc"))
 
     assert sender.posts == []
 
     made.on_event(event("link_down", level=Level.WARNING, exchange="mexc"))
+    clock.advance(20)
+    made.flush_outages()
     made.on_event(event("link_up", level=Level.INFO, exchange="mexc"))
 
     assert [("нет связи" in message.text, "восстановлена" in message.text) for message, _ in sender.posts] == [
@@ -203,11 +284,14 @@ def test_a_recovery_is_silent_unless_something_broke_first():
 
 
 def test_a_recovery_of_one_exchange_is_not_a_recovery_of_another():
-    made, sender = notifier()
+    clock = Clock(datetime(2026, 9, 26, 12, 0))
+    made, sender = notifier(clock=clock)
     made.on_event(event("link_down", level=Level.WARNING, exchange="mexc"))
+    clock.advance(20)
+    made.flush_outages()
     made.on_event(event("link_up", level=Level.INFO, exchange="gate"))
 
-    assert len(sender.posts) == 1
+    assert len(sender.posts) == 1  # чужое восстановление не закрывает наш обрыв
 
 
 def test_a_recovery_at_night_waits_until_morning():

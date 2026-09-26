@@ -38,5 +38,6 @@ min_volume24h_usd = 20000       # оборот слабой ноги за сут
 quiet_hours = ""
 digest_at = "09:00"
 alarms = true
+outage_after_min = 15           # короткие обрывы бирж молчат; авария — это 15 минут без связи
 send_outcome = true
 max_messages_per_hour = 60
