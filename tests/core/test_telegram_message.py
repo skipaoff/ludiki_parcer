@@ -125,5 +125,5 @@ def test_the_daily_digest_reads_as_a_report():
 
 
 def test_an_alarm_says_what_broke_in_words():
-    assert alarm("exchange_down", "MEXC, 4 мин").text == "🔴 <b>нет связи с биржей</b>\nMEXC, 4 мин"
+    assert alarm("link_down", "MEXC, 4 мин").text == "🔴 <b>нет связи с биржей</b>\nMEXC, 4 мин"
     assert alarm("db_connected", "").text == "🟢 <b>база снова на связи</b>"

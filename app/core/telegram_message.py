@@ -175,8 +175,13 @@ def digest(numbers: DigestNumbers) -> Message:
 def alarm(kind: str, detail: str) -> Message:
     """Something the owner must know about a terminal they cannot see."""
     words = {
-        "exchange_down": "нет связи с биржей",
-        "exchange_up": "связь с биржей восстановлена",
+        "link_down": "нет связи с биржей",
+        "link_up": "связь с биржей восстановлена",
+        "leg_close_failed": "нога пары не закрылась",
+        "leg_status_never_resolved": "биржа так и не сказала, что с ордером",
+        "hedge_fix_failed": "не удалось закрыть незахеджированную ногу",
+        "close_positions_unknown": "позиции для закрытия не подтвердились",
+        "stopped_with_open_pairs": "терминал остановлен с открытыми парами",
         "db_unavailable": "база недоступна, записи копятся в буфере",
         "db_connected": "база снова на связи",
         "leg_lost": "нога пары осталась открытой",
@@ -184,5 +189,16 @@ def alarm(kind: str, detail: str) -> Message:
         "started": "терминал запущен",
         "stopped": "терминал остановлен",
     }
-    icon = "🔴" if kind in ("exchange_down", "db_unavailable", "leg_lost", "liquidation_near") else "🟢"
+    bad = {
+        "link_down",
+        "db_unavailable",
+        "leg_lost",
+        "leg_close_failed",
+        "leg_status_never_resolved",
+        "hedge_fix_failed",
+        "close_positions_unknown",
+        "liquidation_near",
+        "stopped_with_open_pairs",
+    }
+    icon = "🔴" if kind in bad else "🟢"
     return Message(text=f"{icon} <b>{words.get(kind, kind)}</b>\n{html.escape(detail)}" if detail else f"{icon} <b>{words.get(kind, kind)}</b>")

@@ -22,9 +22,27 @@ from app.journal.journal import JournalEvent, Level
 
 log = logging.getLogger(__name__)
 
+# Exactly the event types the journal emits — guessed names meant a real outage would never reach the phone
+# (checked against the server's journal, 26.09.2026).
 ALARM_TYPES = frozenset(
-    {"exchange_down", "exchange_up", "db_unavailable", "db_connected", "leg_lost", "liquidation_near", "started", "stopped"}
+    {
+        "link_down",
+        "link_up",
+        "db_unavailable",
+        "db_connected",
+        "leg_lost",
+        "leg_close_failed",
+        "leg_status_never_resolved",
+        "hedge_fix_failed",
+        "close_positions_unknown",
+        "liquidation_near",
+        "stopped_with_open_pairs",
+        "started",
+        "stopped",
+    }
 )
+QUIET_ALARMS = frozenset({"link_up", "db_connected", "started", "stopped"})
+"""Recoveries and lifecycle: worth a line, never worth waking someone at night."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -112,8 +130,12 @@ class TelegramNotifier:
     def on_event(self, event: JournalEvent) -> None:
         if not self._settings.alarms or event.type not in ALARM_TYPES:
             return
-        if event.level is Level.INFO and event.type not in ("started", "stopped", "exchange_up", "db_connected"):
+        if event.level is Level.INFO and event.type not in QUIET_ALARMS:
             return
+        if event.type in QUIET_ALARMS and self._quiet:
+            moment = self._now()
+            if self._quiet.covers(moment.hour * 60 + moment.minute):
+                return
         detail = ", ".join(
             str(value) for key, value in (("exchange", event.exchange), *sorted(event.payload.items())) if value not in (None, "")
         )

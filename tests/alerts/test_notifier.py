@@ -168,6 +168,21 @@ def test_alarms_reach_the_phone_even_at_night():
     assert "нога пары осталась открытой" in sender.posts[0][0].text
 
 
+def test_the_alarm_names_are_the_ones_the_journal_actually_emits():
+    """Выдуманные имена означали бы, что настоящий обрыв связи до телефона не доедет."""
+    made, sender = notifier()
+    made.on_event(event("link_down", level=Level.WARNING, exchange="mexc"))
+
+    assert "нет связи с биржей" in sender.posts[0][0].text
+
+
+def test_a_recovery_at_night_waits_until_morning():
+    made, sender = notifier(clock=datetime(2026, 9, 26, 3, 0), quiet_hours="23:00-08:00")
+    made.on_event(event("link_up", level=Level.INFO, exchange="mexc"))
+
+    assert sender.posts == []
+
+
 def test_routine_events_are_not_alarms():
     made, sender = notifier()
     made.on_event(event("gap_actionable", level=Level.INFO))
