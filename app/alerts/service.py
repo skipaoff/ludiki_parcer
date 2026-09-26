@@ -82,6 +82,11 @@ class GapAlerts:
                 profit_pct=alert.profit_pct,
                 interest=alert.interest,
                 size_usd=alert.size_usd,
+                # Прожитое время и меры фильтров — в событии, чтобы правило «держится 30 секунд» можно было
+                # проверить по журналу, а не на слово.
+                lifetime_ms=alert.lifetime_ms,
+                capacity_usd=alert.capacity_usd,
+                volume24h_weak_usd=alert.volume24h_weak_usd,
                 blocks=list(alert.blocks),
             )
         if alerts and self._on_alerts is not None:
