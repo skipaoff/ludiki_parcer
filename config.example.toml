@@ -80,7 +80,7 @@ max_price_gap_pct = 20      # wider per-token price gap means a wrong multiplier
 max_index_gap_pct = 1       # wider index gap marks the pair suspicious until verified by hand
 
 [feed]
-size_usd = 100                  # size per leg; converted into the same token count on both exchanges
+size_usd = 1000                 # size per leg; converted into the same token count on both exchanges
 min_roi_pct = 1.00              # net ROI by book, after round-trip taker fees, to enter the feed.
                                 # Measured over 840 recorded gaps (23.09.2026): below 1 % only 3 in 100 would have
                                 # paid even at the best possible exit, and they were three quarters of the flow.
@@ -91,6 +91,7 @@ tracking_limit = 20             # of those, at most this many follow gaps that l
 radar_rows = 40                 # coins with the best current spreads shown under the feed even below the threshold
 notify_after_s = 30             # сколько вилка должна продержаться, чтобы о ней сообщили в браузер и в Telegram;
                                 # лента показывает раньше — там смотрит человек, а уведомление будит
+notify_repeat_min = 30          # через сколько минут об этой же монете можно сообщить снова
 funding_horizon_h = 8           # hours of funding counted into the expected result of a gap
 fresh_ms = 1000                 # a leg whose book changed longer ago than this greys the row out...
 quiet_book_max_ms = 10000       # ...unless the exchange's best prices, received after the book, still match it: books are pushed only on change
@@ -170,7 +171,7 @@ enabled = false
 chats = []                      # кому слать: ["480399842", "-1001234567890"]; каждый сначала пишет боту сам
 min_interest = 0                # слать только пары с интересом не ниже (0 — не фильтровать)
 # min_total_pct = 1.5           # и только с итогом не ниже, в процентах
-max_total_pct = 15              # выше — сломанная цена, а не вилка
+# max_total_pct = 15            # потолок итога, если захочется отсекать слишком большие значения
 min_volume24h_usd = 20000       # оборот слабой ноги за сутки: тот же порог, что в фильтрах ленты
 # min_capacity_usd = 100        # сколько денег должно влезать в стакан; пусто — размер сделки целиком
 quiet_hours = ""                # окно тишины по времени машины, например "23:00-08:00"; аварии приходят всегда

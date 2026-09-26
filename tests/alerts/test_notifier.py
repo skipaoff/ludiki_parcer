@@ -96,11 +96,17 @@ def test_a_gap_the_screen_would_hide_never_reaches_the_chat():
     assert sender.posts == [] and made.skipped_threshold == 1
 
 
-def test_a_gap_far_above_anything_real_is_a_broken_price_not_news():
+def test_a_huge_gap_goes_through_unless_a_ceiling_is_asked_for():
+    """Потолка итога по умолчанию нет: крупная вилка и есть новость."""
     made, sender = notifier()
-    made.on_alerts([replace_fields(alert(key="broken"), total="40.0000")])
+    made.on_alerts([replace_fields(alert(key="huge"), total="40.0000")])
 
-    assert sender.posts == [] and made.skipped_threshold == 1
+    assert len(sender.posts) == 1
+
+    capped, capped_sender = notifier(max_total_pct=Decimal("15"))
+    capped.on_alerts([replace_fields(alert(key="huge"), total="40.0000")])
+
+    assert capped_sender.posts == [] and capped.skipped_threshold == 1
 
 
 def test_nothing_buzzes_during_quiet_hours():

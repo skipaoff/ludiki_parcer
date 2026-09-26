@@ -148,7 +148,7 @@ class InstrumentsSettings(_Section):
 
 
 class FeedSettings(_Section):
-    size_usd: Decimal = Field(default=Decimal("100"), gt=0)
+    size_usd: Decimal = Field(default=Decimal("1000"), gt=0)
     min_roi_pct: Decimal = Decimal("1.00")
     candidate_margin_pct: Decimal = Field(default=Decimal("0.50"), ge=0)
     # Books are what turn a spread into a number, and the cap was the binding one: 60 books against 16,463 ranked
@@ -159,6 +159,8 @@ class FeedSettings(_Section):
     radar_rows: int = Field(default=40, ge=0, le=100)  # coins in the radar, each with up to RADAR_PAIRS_PER_TOKEN pairs
     notify_after_s: int = Field(default=30, ge=0)
     """Сколько вилка должна продержаться, чтобы о ней сообщили. Лента показывает раньше: там смотрит человек."""
+    notify_repeat_min: int = Field(default=30, ge=1)
+    """Через сколько минут об этой же монете можно сообщить снова — по монете, а не по паре бирж."""
     funding_horizon_h: Decimal = Field(default=Decimal("8"), ge=1, le=168)  # funding counted into the expected result
     fresh_ms: int = Field(default=1000, ge=100)
     quiet_book_max_ms: int = Field(default=10000, ge=1000)
@@ -238,8 +240,8 @@ class TelegramSettings(_Section):
     """Кому слать: личные чаты и каналы. Каждый должен сам написать боту или сделать его администратором."""
     min_interest: int = Field(default=0, ge=0, le=100)
     min_total_pct: Decimal | None = None
-    max_total_pct: Decimal | None = Decimal("15")
-    """Выше этого — сломанная цена, а не вилка; те же 15% стоят фильтром в ленте."""
+    max_total_pct: Decimal | None = None
+    """Потолок итога: по умолчанию нет — крупная вилка и есть новость, а подделки отсекают индексы и чёрный список."""
     min_volume24h_usd: Decimal | None = Decimal("20000")
     """Оборот слабой ноги за сутки — тот же порог, что в фильтрах экрана."""
     min_capacity_usd: Decimal | None = None

@@ -24,8 +24,12 @@ ACCOUNT_BLOCKS = frozenset(
 
 @dataclass(frozen=True, slots=True)
 class AlertRules:
-    cooldown_ms: int = 600_000
-    """The same pair is not announced again within this window, however often it leaves and re-enters the feed."""
+    cooldown_ms: int = 1_800_000
+    """
+    The same coin is not announced again within this window. Keyed by coin, not by pair of venues: ONE on
+    gate→bitget and ONE on gate→binance are one piece of news to a person, and the screenshot of three ONE
+    messages in ten minutes is what keying by pair looks like (26.09.2026).
+    """
     min_lifetime_ms: int = 30_000
     """
     A gap must have held this long to be worth interrupting anyone. The feed lets a large gap in after five
@@ -95,7 +99,10 @@ def decide(
     now_ms: int,
     rules: AlertRules = AlertRules(),
 ) -> tuple[list[GapAlert], dict[str, int]]:
-    """Feed rows in, alerts out, plus the new "already announced" map the caller keeps for the next round."""
+    """
+    Feed rows in, alerts out, plus the new "already announced" map the caller keeps for the next round.
+    The map is keyed by coin: the cooldown is about a person's attention, and that is spent per coin.
+    """
     fresh = {key: ts for key, ts in announced.items() if now_ms - ts < rules.cooldown_ms * 2}
     alerts: list[GapAlert] = []
     for row in rows:
@@ -108,10 +115,11 @@ def decide(
             # Too young to announce — and not remembered as announced, so it still counts once it holds.
             continue
         key = str(row.get("key"))
-        last = fresh.get(key)
+        coin = str(row.get("token"))
+        last = fresh.get(coin)
         if last is not None and now_ms - last < rules.cooldown_ms:
             continue
-        fresh[key] = now_ms
+        fresh[coin] = now_ms
         alerts.append(
             GapAlert(
                 key=key,

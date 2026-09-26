@@ -251,7 +251,10 @@ async def _serve(
     alerts = GapAlerts(
         lambda: execution.annotate(engine.view()["rows"]),
         journal,
-        AlertRules(min_lifetime_ms=settings.feed.notify_after_s * 1000),
+        AlertRules(
+            min_lifetime_ms=settings.feed.notify_after_s * 1000,
+            cooldown_ms=settings.feed.notify_repeat_min * 60_000,
+        ),
         on_alerts=notifier.on_alerts if notifier else None,
         on_finished=notifier.on_finished if notifier else None,
     )

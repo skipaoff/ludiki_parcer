@@ -156,3 +156,27 @@ def test_a_gap_without_a_lifetime_is_not_announced_either():
     nameless.pop("lifetime_ms")
 
     assert decide([nameless], {}, now_ms=1_000, rules=RULES)[0] == []
+
+
+def test_the_same_coin_on_another_pair_of_venues_is_the_same_news():
+    """ONE на gate→bitget и ONE на gate→binance — одна новость для человека, а не две."""
+    first = row(key="gate:ONE_USDT|bitget:ONEUSDT", token="ONE")
+    second = row(key="gate:ONE_USDT|binance:ONEUSDT", token="ONE")
+
+    alerts, announced = decide([first, second], {}, now_ms=1_000, rules=RULES)
+
+    assert len(alerts) == 1
+    assert list(announced) == ["ONE"]  # помним монету, а не пару бирж
+
+    again, _ = decide([second], announced, now_ms=1_000 + RULES.cooldown_ms - 1, rules=RULES)
+    assert again == []
+
+    later, _ = decide([second], announced, now_ms=1_000 + RULES.cooldown_ms, rules=RULES)
+    assert [alert.long_exchange for alert in later] == ["mexc"]
+
+
+def test_different_coins_do_not_wait_for_each_other():
+    alerts, announced = decide([row(token="ONE"), row(key="other", token="CATE")], {}, now_ms=1_000, rules=RULES)
+
+    assert sorted(alert.token for alert in alerts) == ["CATE", "ONE"]
+    assert sorted(announced) == ["CATE", "ONE"]
