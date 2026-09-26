@@ -157,8 +157,9 @@ def test_outcomes_can_be_switched_off():
     assert sender.amends == []
 
 
-def event(kind: str, level: Level = Level.CRITICAL, **payload) -> JournalEvent:
-    return JournalEvent(ts=datetime.now(), level=level, source="test", type=kind, payload=payload)
+def event(kind: str, level: Level = Level.CRITICAL, exchange: str | None = None, **payload) -> JournalEvent:
+    # exchange живёт своим полем, а не в payload: по нему различаются аварии разных бирж
+    return JournalEvent(ts=datetime.now(), level=level, source="test", type=kind, exchange=exchange, payload=payload)
 
 
 def test_alarms_reach_the_phone_even_at_night():
@@ -174,6 +175,33 @@ def test_the_alarm_names_are_the_ones_the_journal_actually_emits():
     made.on_event(event("link_down", level=Level.WARNING, exchange="mexc"))
 
     assert "нет связи с биржей" in sender.posts[0][0].text
+
+
+def test_a_recovery_is_silent_unless_something_broke_first():
+    """Каждый перезапуск видит десять живых бирж; «связь восстановлена» по каждой — это спам."""
+    made, sender = notifier()
+    made.on_event(event("link_up", level=Level.INFO, exchange="mexc"))
+
+    assert sender.posts == []
+
+    made.on_event(event("link_down", level=Level.WARNING, exchange="mexc"))
+    made.on_event(event("link_up", level=Level.INFO, exchange="mexc"))
+
+    assert [("нет связи" in message.text, "восстановлена" in message.text) for message, _ in sender.posts] == [
+        (True, False),
+        (False, True),
+    ]
+
+    made.on_event(event("link_up", level=Level.INFO, exchange="mexc"))
+    assert len(sender.posts) == 2  # второй раз подряд — уже не новость
+
+
+def test_a_recovery_of_one_exchange_is_not_a_recovery_of_another():
+    made, sender = notifier()
+    made.on_event(event("link_down", level=Level.WARNING, exchange="mexc"))
+    made.on_event(event("link_up", level=Level.INFO, exchange="gate"))
+
+    assert len(sender.posts) == 1
 
 
 def test_a_recovery_at_night_waits_until_morning():

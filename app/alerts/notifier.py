@@ -43,6 +43,8 @@ ALARM_TYPES = frozenset(
 )
 QUIET_ALARMS = frozenset({"link_up", "db_connected", "started", "stopped"})
 """Recoveries and lifecycle: worth a line, never worth waking someone at night."""
+RECOVERIES = {"link_up": "link_down", "db_connected": "db_unavailable"}
+"""A recovery is news only after the break it recovers from: every start reports ten healthy exchanges."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -94,6 +96,7 @@ class TelegramNotifier:
         self.skipped_quiet = 0
         self.skipped_threshold = 0
         self.skipped_rate = 0
+        self._broken: set[tuple[str, str | None]] = set()
 
     # ── gaps ────────────────────────────────────────────────────────────────
 
@@ -136,6 +139,14 @@ class TelegramNotifier:
             moment = self._now()
             if self._quiet.covers(moment.hour * 60 + moment.minute):
                 return
+        broken_by = RECOVERIES.get(event.type)
+        if broken_by is not None:
+            # Nothing was broken, so nothing recovered: a restart sees ten healthy exchanges and must stay silent.
+            if (broken_by, event.exchange) not in self._broken:
+                return
+            self._broken.discard((broken_by, event.exchange))
+        elif event.type in RECOVERIES.values():
+            self._broken.add((event.type, event.exchange))
         detail = ", ".join(
             str(value) for key, value in (("exchange", event.exchange), *sorted(event.payload.items())) if value not in (None, "")
         )
